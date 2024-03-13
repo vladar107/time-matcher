@@ -1,0 +1,5 @@
+project:
+  name: Time Matcher
+  tz: Europe/Paris
+  adrFolder: documentation/adr
+  packages: []
