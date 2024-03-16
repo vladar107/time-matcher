@@ -2,6 +2,14 @@ Data Model
 
 ```mermaid
 erDiagram
+User {
+  uuid id
+  string name
+  string email
+  datetime created_at
+  datetime deleted_at
+}
+
 Attendee {
   uuid id
   string name
