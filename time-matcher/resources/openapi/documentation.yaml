@@ -1,0 +1,8 @@
+openapi: "3.0.3"
+info:
+  title: "time_matcher API"
+  description: "time_matcher API"
+  version: "1.0.0"
+servers:
+- url: "https://time_matcher"
+paths: {}
