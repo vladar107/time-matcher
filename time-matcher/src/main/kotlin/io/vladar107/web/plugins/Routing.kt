@@ -1,4 +1,4 @@
-package io.vladar107.plugins
+package io.vladar107.web.plugins
 
 import io.ktor.resources.*
 import io.ktor.server.application.*

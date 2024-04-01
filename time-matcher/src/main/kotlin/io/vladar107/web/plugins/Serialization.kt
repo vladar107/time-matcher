@@ -1,4 +1,4 @@
-package io.vladar107.plugins
+package io.vladar107.web.plugins
 
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
