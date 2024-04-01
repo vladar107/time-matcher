@@ -1,7 +1,7 @@
 package io.vladar107.infrastructure
 
-interface Command<out TResult>
+interface Command<TResult>
 
-interface CommandHandler<TResult, in TParam: Command<TResult>> {
+interface CommandHandler<TResult, TParam: Command<TResult>> {
     suspend fun handle(command: TParam): TResult
 }
