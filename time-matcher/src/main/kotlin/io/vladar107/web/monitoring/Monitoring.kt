@@ -1,4 +1,4 @@
-package io.vladar107.plugins
+package io.vladar107.web.monitoring
 
 import io.ktor.server.application.*
 import io.ktor.server.metrics.micrometer.*

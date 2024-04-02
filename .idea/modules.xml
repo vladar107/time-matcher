@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/time-matcher.iml" filepath="$PROJECT_DIR$/.idea/time-matcher.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/time-matcher.iml" filepath="$PROJECT_DIR$/.idea/modules/time-matcher.iml" />
     </modules>
   </component>
 </project>

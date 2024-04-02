@@ -4,7 +4,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.testing.*
-import io.vladar107.plugins.*
+import io.vladar107.web.plugins.configureRouting
 import kotlin.test.*
 
 class ApplicationTest {
