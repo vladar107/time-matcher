@@ -2,6 +2,8 @@ package io.vladar107.web.di
 
 import io.vladar107.application.availability.AddBusyBlockCommand
 import io.vladar107.application.availability.AddBusyBlockCommandHandler
+import io.vladar107.application.booking.CreateEventTypeCommand
+import io.vladar107.application.booking.CreateEventTypeCommandHandler
 import io.vladar107.application.booking.SetSettingsCommand
 import io.vladar107.application.booking.SetSettingsCommandHandler
 import io.vladar107.application.userCreation.CreatUserCommand
@@ -21,5 +23,8 @@ fun DI.MainBuilder.configureCommands() {
     }
     bind<CommandHandler<Unit, SetSettingsCommand>>() with provider {
         SetSettingsCommandHandler(instance())
+    }
+    bind<CommandHandler<Unit, CreateEventTypeCommand>>() with provider {
+        CreateEventTypeCommandHandler(instance())
     }
 }
