@@ -40,5 +40,6 @@ dependencies {
     implementation("org.kodein.di:kodein-di:$kodein_version")
     implementation("org.kodein.di:kodein-di-framework-ktor-server-jvm:$kodein_version")
     testImplementation("io.ktor:ktor-server-test-host-jvm")
+    testImplementation("io.ktor:ktor-client-content-negotiation")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version")
 }

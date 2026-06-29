@@ -1,5 +1,9 @@
 package io.vladar107.web.di
 
+import io.vladar107.application.availability.AddBusyBlockCommand
+import io.vladar107.application.availability.AddBusyBlockCommandHandler
+import io.vladar107.application.availability.SetAvailabilityRulesCommand
+import io.vladar107.application.availability.SetAvailabilityRulesCommandHandler
 import io.vladar107.application.userCreation.CreatUserCommand
 import io.vladar107.application.userCreation.CreateUserCommandHandler
 import io.vladar107.infrastructure.CommandHandler
@@ -11,5 +15,11 @@ import org.kodein.di.provider
 fun DI.MainBuilder.configureCommands() {
     bind<CommandHandler<Unit, CreatUserCommand>>() with provider {
         CreateUserCommandHandler(instance())
+    }
+    bind<CommandHandler<Unit, AddBusyBlockCommand>>() with provider {
+        AddBusyBlockCommandHandler(instance())
+    }
+    bind<CommandHandler<Unit, SetAvailabilityRulesCommand>>() with provider {
+        SetAvailabilityRulesCommandHandler(instance())
     }
 }
