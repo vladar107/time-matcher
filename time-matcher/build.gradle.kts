@@ -39,6 +39,6 @@ dependencies {
     implementation("io.ktor:ktor-server-config-yaml:2.3.9")
     implementation("org.kodein.di:kodein-di:$kodein_version")
     implementation("org.kodein.di:kodein-di-framework-ktor-server-jvm:$kodein_version")
-    testImplementation("io.ktor:ktor-server-tests-jvm")
+    testImplementation("io.ktor:ktor-server-tests-jvm:$ktor_version")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version")
 }
