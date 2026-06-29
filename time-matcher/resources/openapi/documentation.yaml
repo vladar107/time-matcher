@@ -2,10 +2,12 @@ openapi: "3.0.3"
 info:
   title: "Time Matcher API"
   description: >
-    Time Matcher — availability finder (Phase 1). Computes open meeting slots by
-    subtracting busy times (aggregated across calendars) from recurring working
-    hours, honoring buffers, minimum notice, and date overrides. Calendar busy
-    data and availability rules are held in memory; times are ISO-8601.
+    Time Matcher — availability finder and booking engine (Phase 2a). Computes
+    open meeting slots by subtracting busy times from recurring working hours,
+    honoring per-event-type buffers, minimum notice, and date overrides.
+    EventTypes hold a slug (public link), duration, and buffer config.
+    Bookings are written to the calendar; configuration persists in H2.
+    Times are ISO-8601.
   version: "0.0.1"
 servers:
   - url: "http://0.0.0.0:8080"
@@ -51,7 +53,7 @@ paths:
     put:
       tags: [availability]
       summary: "Set availability rules"
-      description: "Replaces the current availability configuration."
+      description: "Replaces the current availability configuration. Buffers are now per-EventType, not here."
       requestBody:
         required: true
         content:
@@ -60,8 +62,6 @@ paths:
             example:
               zone: "Europe/Paris"
               granularityMinutes: 30
-              bufferBeforeMinutes: 0
-              bufferAfterMinutes: 0
               minimumNoticeMinutes: 0
               weekly:
                 MONDAY: [ { start: "09:00", end: "17:00" } ]
@@ -73,7 +73,7 @@ paths:
         "204":
           description: "Configuration saved."
         "400":
-          description: "Invalid config (bad zone, non-positive granularity, negative buffer/notice, malformed times)."
+          description: "Invalid config (bad zone, non-positive granularity, negative notice, malformed times)."
   /calendars/{calendarId}/busy:
     post:
       tags: [availability]
@@ -135,6 +135,135 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
+  /event-types:
+    post:
+      tags: [booking]
+      summary: "Create an event type"
+      description: >
+        Creates a new event type (public booking link). `slug` must be unique.
+        `durationMinutes` must be positive; buffer values must be non-negative.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateEventTypeRequest" }
+            example:
+              slug: "30min-intro"
+              name: "30-minute intro call"
+              durationMinutes: 30
+              bufferBeforeMinutes: 5
+              bufferAfterMinutes: 5
+      responses:
+        "201":
+          description: "Event type created."
+        "409":
+          description: "Slug already in use."
+        "400":
+          description: "Invalid request (blank slug/name, non-positive duration, negative buffers)."
+    get:
+      tags: [booking]
+      summary: "List all event types"
+      description: "Returns all event types owned by the host."
+      responses:
+        "200":
+          description: "List of event types."
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EventTypeDto" }
+  /event-types/{slug}:
+    get:
+      tags: [booking]
+      summary: "Get an event type by slug"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: "Event type slug."
+          schema: { type: string, example: "30min-intro" }
+      responses:
+        "200":
+          description: "Event type found."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventTypeDto" }
+        "404":
+          description: "Unknown event type."
+  /book/{slug}/slots:
+    get:
+      tags: [booking]
+      summary: "Find available slots for a public booking link"
+      description: >
+        Returns open slots for the given event type within the window. Slot
+        duration and buffers are taken from the EventType; start/end are
+        rendered in the host's configured time zone.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: "Event type slug."
+          schema: { type: string, example: "30min-intro" }
+        - name: from
+          in: query
+          required: true
+          description: "Window start, ISO-8601 instant."
+          schema: { type: string, format: date-time, example: "2030-01-07T00:00:00Z" }
+        - name: to
+          in: query
+          required: true
+          description: "Window end, ISO-8601 instant. Must be after `from`."
+          schema: { type: string, format: date-time, example: "2030-01-07T23:59:59Z" }
+      responses:
+        "200":
+          description: "Open slots (possibly empty), sorted ascending."
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TimeSlot" }
+        "404":
+          description: "Unknown event type."
+        "400":
+          description: "Invalid query (unparseable from/to or from >= to)."
+  /book/{slug}:
+    post:
+      tags: [booking]
+      summary: "Book a slot for a public booking link"
+      description: >
+        Books the requested slot for the attendee. Validates the slot is still
+        open (serialized under a Mutex), then writes the event to the calendar.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: "Event type slug."
+          schema: { type: string, example: "30min-intro" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookRequest" }
+            example:
+              attendeeName: "Alice"
+              attendeeEmail: "alice@example.com"
+              start: "2030-01-07T09:00:00Z"
+      responses:
+        "201":
+          description: "Booking confirmed."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingConfirmation" }
+              example:
+                start: "2030-01-07T09:00:00+01:00"
+                end: "2030-01-07T09:30:00+01:00"
+                eventType: "30-minute intro call"
+        "409":
+          description: "Slot no longer available (double-booking prevented)."
+        "404":
+          description: "Unknown event type."
+        "400":
+          description: "Invalid booking (blank attendee, unparseable start instant)."
 components:
   schemas:
     TimeSlot:
@@ -169,11 +298,10 @@ components:
     AvailabilityConfigRequest:
       type: object
       required: [zone, granularityMinutes]
+      description: "Host availability configuration. Buffers are per-EventType, not here."
       properties:
         zone: { type: string, description: "IANA zone id.", example: "Europe/Paris" }
         granularityMinutes: { type: integer, format: int64, description: "Slot grid step; must be > 0.", example: 30 }
-        bufferBeforeMinutes: { type: integer, format: int64, default: 0, description: "Padding before busy blocks; >= 0." }
-        bufferAfterMinutes: { type: integer, format: int64, default: 0, description: "Padding after busy blocks; >= 0." }
         minimumNoticeMinutes: { type: integer, format: int64, default: 0, description: "Earliest offset from now; >= 0." }
         weekly:
           type: object
@@ -190,3 +318,41 @@ components:
       properties:
         name: { type: string }
         email: { type: string, nullable: true }
+    CreateEventTypeRequest:
+      type: object
+      description: "Request to create a new event type."
+      required: [slug, name, durationMinutes]
+      properties:
+        slug: { type: string, description: "URL-safe identifier, must be unique.", example: "30min-intro" }
+        name: { type: string, description: "Human-readable name.", example: "30-minute intro call" }
+        durationMinutes: { type: integer, format: int64, description: "Meeting duration in minutes; must be > 0.", example: 30 }
+        bufferBeforeMinutes: { type: integer, format: int64, default: 0, description: "Padding before the meeting; >= 0.", example: 5 }
+        bufferAfterMinutes: { type: integer, format: int64, default: 0, description: "Padding after the meeting; >= 0.", example: 5 }
+    EventTypeDto:
+      type: object
+      description: "An event type with its configuration and status."
+      required: [id, slug, name, durationMinutes, bufferBeforeMinutes, bufferAfterMinutes, status]
+      properties:
+        id: { type: string, description: "Unique identifier (UUID).", example: "550e8400-e29b-41d4-a716-446655440000" }
+        slug: { type: string, description: "URL-safe identifier.", example: "30min-intro" }
+        name: { type: string, description: "Human-readable name.", example: "30-minute intro call" }
+        durationMinutes: { type: integer, format: int64, description: "Meeting duration in minutes.", example: 30 }
+        bufferBeforeMinutes: { type: integer, format: int64, description: "Padding before the meeting in minutes.", example: 5 }
+        bufferAfterMinutes: { type: integer, format: int64, description: "Padding after the meeting in minutes.", example: 5 }
+        status: { type: string, description: "Event type status (e.g. ACTIVE).", example: "ACTIVE" }
+    BookRequest:
+      type: object
+      description: "Request to book a slot."
+      required: [attendeeName, attendeeEmail, start]
+      properties:
+        attendeeName: { type: string, description: "Full name of the attendee.", example: "Alice" }
+        attendeeEmail: { type: string, description: "Email address of the attendee.", example: "alice@example.com" }
+        start: { type: string, format: date-time, description: "Desired slot start as ISO-8601 instant.", example: "2030-01-07T09:00:00Z" }
+    BookingConfirmation:
+      type: object
+      description: "Confirmation of a successful booking."
+      required: [start, end, eventType]
+      properties:
+        start: { type: string, format: date-time, description: "Booked start, ISO-8601 with zone offset.", example: "2030-01-07T09:00:00+01:00" }
+        end: { type: string, format: date-time, description: "Booked end, ISO-8601 with zone offset.", example: "2030-01-07T09:30:00+01:00" }
+        eventType: { type: string, description: "Name of the event type.", example: "30-minute intro call" }
