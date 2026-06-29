@@ -4,6 +4,9 @@ val logback_version: String by project
 
 val prometeus_version: String by project
 val kodein_version: String by project
+val h2_version: String by project
+val flyway_version: String by project
+val exposed_version: String by project
 plugins {
     kotlin("jvm") version "2.4.0"
     id("io.ktor.plugin") version "3.5.1"
@@ -42,4 +45,11 @@ dependencies {
     testImplementation("io.ktor:ktor-server-test-host-jvm")
     testImplementation("io.ktor:ktor-client-content-negotiation")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version")
+    implementation("org.jetbrains.exposed:exposed-core:$exposed_version")
+    implementation("org.jetbrains.exposed:exposed-jdbc:$exposed_version")
+    implementation("org.jetbrains.exposed:exposed-java-time:$exposed_version")
+    implementation("com.h2database:h2:$h2_version")
+    implementation("org.flywaydb:flyway-core:$flyway_version")
 }
+
+tasks.test { maxParallelForks = 1 }
