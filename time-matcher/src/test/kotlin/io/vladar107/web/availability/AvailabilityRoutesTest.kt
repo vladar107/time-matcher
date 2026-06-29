@@ -5,10 +5,12 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.config.*
 import io.ktor.server.testing.*
 import io.vladar107.module
 import io.vladar107.web.availability.dto.SlotDto
 import kotlinx.serialization.json.Json
+import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -19,8 +21,11 @@ class AvailabilityRoutesTest {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
     }
 
+    private fun uniqueDbUrl() = "jdbc:h2:mem:routes-${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
+
     @Test
     fun findsSlotsAroundBusyBlocksAcrossCalendars() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val client = jsonClient()
 
@@ -63,6 +68,7 @@ class AvailabilityRoutesTest {
 
     @Test
     fun rejectsInvalidWindow() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val response = jsonClient().get("/availability/slots") {
             parameter("from", "2030-01-07T12:00:00Z")
@@ -74,6 +80,7 @@ class AvailabilityRoutesTest {
 
     @Test
     fun closedDayHasNoSlots() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val client = jsonClient()
         client.put("/availability/config") {
@@ -93,6 +100,7 @@ class AvailabilityRoutesTest {
 
     @Test
     fun rejectsZeroGranularity() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val response = jsonClient().put("/availability/config") {
             contentType(ContentType.Application.Json)
@@ -102,17 +110,19 @@ class AvailabilityRoutesTest {
     }
 
     @Test
-    fun rejectsNegativeBuffer() = testApplication {
+    fun rejectsNegativeMinimumNotice() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val response = jsonClient().put("/availability/config") {
             contentType(ContentType.Application.Json)
-            setBody("""{ "zone": "UTC", "granularityMinutes": 30, "bufferBeforeMinutes": -5, "weekly": {}, "overrides": [] }""")
+            setBody("""{ "zone": "UTC", "granularityMinutes": 30, "minimumNoticeMinutes": -5, "weekly": {}, "overrides": [] }""")
         }
         assertEquals(HttpStatusCode.BadRequest, response.status)
     }
 
     @Test
     fun rendersSlotStartInConfiguredZone() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val client = jsonClient()
 
@@ -148,6 +158,7 @@ class AvailabilityRoutesTest {
 
     @Test
     fun busyBlockSplitsTheWorkingDay() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to uniqueDbUrl()) }
         application { module() }
         val client = jsonClient()
         client.put("/availability/config") {

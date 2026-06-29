@@ -7,7 +7,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.vladar107.application.availability.AddBusyBlockCommand
 import io.vladar107.application.availability.FindAvailableSlotsQuery
-import io.vladar107.application.availability.SetAvailabilityRulesCommand
+import io.vladar107.application.booking.SetSettingsCommand
 import io.vladar107.infrastructure.CommandProvider
 import io.vladar107.infrastructure.QueryProvider
 import io.vladar107.web.availability.dto.AvailabilityConfigRequest
@@ -51,12 +51,12 @@ fun Application.configureAvailability() {
         }
 
         put("/availability/config") {
-            val rules = try {
-                call.receive<AvailabilityConfigRequest>().toRules()
+            val settings = try {
+                call.receive<AvailabilityConfigRequest>().toSettings()
             } catch (e: Exception) {
                 return@put call.respond(HttpStatusCode.BadRequest, "Invalid config: ${e.message}")
             }
-            commandProvider.run(SetAvailabilityRulesCommand(rules))
+            commandProvider.run(SetSettingsCommand(settings))
             call.respond(HttpStatusCode.NoContent)
         }
 

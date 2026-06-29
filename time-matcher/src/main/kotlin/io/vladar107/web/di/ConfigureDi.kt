@@ -14,6 +14,6 @@ fun Application.configureDi() {
         configureCommands()
         configureQueries()
         configureRepositories()
-        configureExternalServices()
+        configureExternalServices(this@configureDi)
     }
 }
