@@ -47,4 +47,17 @@ class ExposedRepositoriesTest {
     @Test fun connectedCalendarHasSeededDefault() = runBlocking {
         assertEquals("IN_MEMORY", ExposedConnectedCalendarRepository().default().provider)
     }
+
+    @Test fun settingsRoundTripsSecondsInTime() = runBlocking {
+        val repo = ExposedSettingsRepository()
+        val range = LocalTimeRange(LocalTime.of(9, 0, 30), LocalTime.of(17, 0, 45))
+        val settings = Settings(
+            ZoneId.of("UTC"),
+            WeeklyAvailability(mapOf(DayOfWeek.MONDAY to listOf(range))),
+            emptyList(), Duration.ofMinutes(15), Duration.ofHours(1)
+        )
+        repo.save(settings)
+        val reloaded = repo.load()
+        assertEquals(listOf(range), reloaded.weekly.rangesFor(DayOfWeek.MONDAY))
+    }
 }

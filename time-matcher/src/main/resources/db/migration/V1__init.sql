@@ -6,11 +6,11 @@ CREATE TABLE settings (
 );
 CREATE TABLE working_hours (
     id UUID PRIMARY KEY, day_of_week VARCHAR(9) NOT NULL,
-    start_time VARCHAR(5) NOT NULL, end_time VARCHAR(5) NOT NULL
+    start_time VARCHAR(8) NOT NULL, end_time VARCHAR(8) NOT NULL
 );
 CREATE TABLE date_override (
     id UUID PRIMARY KEY, override_date VARCHAR(10) NOT NULL,
-    start_time VARCHAR(5), end_time VARCHAR(5)
+    start_time VARCHAR(8), end_time VARCHAR(8)
 );
 CREATE TABLE event_type (
     id UUID PRIMARY KEY, slug VARCHAR(128) NOT NULL UNIQUE, name VARCHAR(256) NOT NULL,

@@ -10,13 +10,13 @@ object SettingsTable : Table("settings") {
 
 object WorkingHoursTable : Table("working_hours") {
     val id = uuid("id"); val dayOfWeek = varchar("day_of_week", 9)
-    val startTime = varchar("start_time", 5); val endTime = varchar("end_time", 5)
+    val startTime = varchar("start_time", 8); val endTime = varchar("end_time", 8)
     override val primaryKey = PrimaryKey(id)
 }
 
 object DateOverrideTable : Table("date_override") {
     val id = uuid("id"); val date = varchar("override_date", 10)
-    val startTime = varchar("start_time", 5).nullable(); val endTime = varchar("end_time", 5).nullable()
+    val startTime = varchar("start_time", 8).nullable(); val endTime = varchar("end_time", 8).nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
