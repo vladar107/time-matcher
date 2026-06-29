@@ -17,6 +17,10 @@ import org.kodein.di.instance
 import org.kodein.di.ktor.closestDI
 import java.time.Duration
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+
+private val SLOT_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ssXXX")
 
 fun Application.configureAvailability() {
     val commandProvider by closestDI { this@configureAvailability }.instance<CommandProvider>()
@@ -37,8 +41,13 @@ fun Application.configureAvailability() {
             } catch (e: Exception) {
                 return@get call.respond(HttpStatusCode.BadRequest, "Invalid query: ${e.message}")
             }
-            val slots = queryProvider.query(query)
-            call.respond(slots.map { SlotDto(it.start.toString(), it.end.toString()) })
+            val result = queryProvider.query(query)
+            call.respond(result.slots.map {
+                SlotDto(
+                    SLOT_FORMATTER.format(OffsetDateTime.ofInstant(it.start, result.zone)),
+                    SLOT_FORMATTER.format(OffsetDateTime.ofInstant(it.end, result.zone)),
+                )
+            })
         }
 
         put("/availability/config") {

@@ -11,6 +11,7 @@ import java.time.Instant
 import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class FindAvailableSlotsQueryHandlerTest {
@@ -33,14 +34,15 @@ class FindAvailableSlotsQueryHandlerTest {
             configRepository = fakeConfig,
             clock = Clock.fixed(t("2020-01-01T00:00:00Z"), ZoneId.of("UTC")),
         )
-        val slots = handler.handle(
+        val result = handler.handle(
             FindAvailableSlotsQuery(
                 from = t("2030-01-07T00:00:00Z"),
                 to = t("2030-01-07T23:59:59Z"),
                 duration = Duration.ofMinutes(60),
             )
         )
-        assertEquals(t("2030-01-07T09:00:00Z"), slots.first().start)
-        assertTrue(slots.isNotEmpty())
+        assertTrue(result.slots.isNotEmpty())
+        assertEquals(t("2030-01-07T09:00:00Z"), result.slots.first().start)
+        assertEquals(ZoneId.of("UTC"), result.zone)
     }
 }

@@ -92,6 +92,61 @@ class AvailabilityRoutesTest {
     }
 
     @Test
+    fun rejectsZeroGranularity() = testApplication {
+        application { module() }
+        val response = jsonClient().put("/availability/config") {
+            contentType(ContentType.Application.Json)
+            setBody("""{ "zone": "UTC", "granularityMinutes": 0, "weekly": {}, "overrides": [] }""")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun rejectsNegativeBuffer() = testApplication {
+        application { module() }
+        val response = jsonClient().put("/availability/config") {
+            contentType(ContentType.Application.Json)
+            setBody("""{ "zone": "UTC", "granularityMinutes": 30, "bufferBeforeMinutes": -5, "weekly": {}, "overrides": [] }""")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun rendersSlotStartInConfiguredZone() = testApplication {
+        application { module() }
+        val client = jsonClient()
+
+        // Configure Europe/Paris, Monday 09:00-17:00, 60-min grid.
+        // 2030-01-07 is a Monday; January is CET = UTC+01:00.
+        client.put("/availability/config") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "zone": "Europe/Paris",
+                  "granularityMinutes": 60,
+                  "weekly": { "MONDAY": [ { "start": "09:00", "end": "17:00" } ] },
+                  "overrides": []
+                }
+                """.trimIndent()
+            )
+        }
+
+        // Query window in UTC — covers the full day.
+        val response = client.get("/availability/slots") {
+            parameter("from", "2030-01-07T00:00:00Z")
+            parameter("to", "2030-01-07T23:59:59Z")
+            parameter("duration", "PT1H")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        val slots = Json.decodeFromString<List<SlotDto>>(response.bodyAsText())
+
+        assertTrue(slots.isNotEmpty())
+        // First slot should be 09:00 in Paris (+01:00 in January).
+        assertEquals("2030-01-07T09:00:00+01:00", slots.first().start)
+    }
+
+    @Test
     fun busyBlockSplitsTheWorkingDay() = testApplication {
         application { module() }
         val client = jsonClient()

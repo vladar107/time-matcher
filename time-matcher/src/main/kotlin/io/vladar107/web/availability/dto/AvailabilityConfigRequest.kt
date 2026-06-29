@@ -29,6 +29,10 @@ data class AvailabilityConfigRequest(
 ) {
     /** Parse into domain rules. Throws IllegalArgumentException / DateTimeException on bad input. */
     fun toRules(): AvailabilityRules {
+        require(granularityMinutes > 0) { "granularityMinutes must be positive" }
+        require(bufferBeforeMinutes >= 0) { "bufferBeforeMinutes must be non-negative" }
+        require(bufferAfterMinutes >= 0) { "bufferAfterMinutes must be non-negative" }
+        require(minimumNoticeMinutes >= 0) { "minimumNoticeMinutes must be non-negative" }
         fun range(dto: LocalTimeRangeDto) = LocalTimeRange(LocalTime.parse(dto.start), LocalTime.parse(dto.end))
         return AvailabilityRules(
             zone = ZoneId.of(zone),
