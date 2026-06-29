@@ -1,5 +1,7 @@
 C4 Container Diagram
 
+> Phase 1 (implemented): in-app availability finder — `GET /availability/slots` over in-memory calendars. External calendar sync, persistence, booking, and bots are later phases.
+
 ```mermaid
 C4Container
 title C4 Container Diagram

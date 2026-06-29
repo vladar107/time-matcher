@@ -71,4 +71,45 @@ class AvailabilityRoutesTest {
         }
         assertEquals(HttpStatusCode.BadRequest, response.status)
     }
+
+    @Test
+    fun closedDayHasNoSlots() = testApplication {
+        application { module() }
+        val client = jsonClient()
+        client.put("/availability/config") {
+            contentType(ContentType.Application.Json)
+            setBody("""{ "zone": "UTC", "granularityMinutes": 30, "weekly": { "MONDAY": [ { "start": "09:00", "end": "17:00" } ] }, "overrides": [] }""")
+        }
+        // 2030-01-08 is a Tuesday (not configured).
+        val response = client.get("/availability/slots") {
+            parameter("from", "2030-01-08T00:00:00Z")
+            parameter("to", "2030-01-08T23:59:59Z")
+            parameter("duration", "PT1H")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        val slots = Json.decodeFromString<List<SlotDto>>(response.bodyAsText())
+        assertTrue(slots.isEmpty())
+    }
+
+    @Test
+    fun busyBlockSplitsTheWorkingDay() = testApplication {
+        application { module() }
+        val client = jsonClient()
+        client.put("/availability/config") {
+            contentType(ContentType.Application.Json)
+            setBody("""{ "zone": "UTC", "granularityMinutes": 60, "weekly": { "MONDAY": [ { "start": "09:00", "end": "12:00" } ] }, "overrides": [] }""")
+        }
+        client.post("/calendars/work/busy") {
+            contentType(ContentType.Application.Json)
+            setBody("""{ "start": "2030-01-07T10:00:00Z", "end": "2030-01-07T11:00:00Z" }""")
+        }
+        val response = client.get("/availability/slots") {
+            parameter("from", "2030-01-07T00:00:00Z")
+            parameter("to", "2030-01-07T23:59:59Z")
+            parameter("duration", "PT1H")
+        }
+        val slots = Json.decodeFromString<List<SlotDto>>(response.bodyAsText())
+        // 09:00-12:00 minus 10:00-11:00 -> only 09:00 and 11:00 fit a 1h slot.
+        assertEquals(listOf("2030-01-07T09:00:00Z", "2030-01-07T11:00:00Z"), slots.map { it.start })
+    }
 }
