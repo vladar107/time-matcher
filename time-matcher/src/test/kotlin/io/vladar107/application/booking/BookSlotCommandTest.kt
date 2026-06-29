@@ -63,4 +63,38 @@ class BookSlotCommandTest {
     @Test fun unknownSlugIsNotFound() = runBlocking {
         assertTrue(handler(CopyOnWriteArrayList()).handle(BookSlotCommand("nope", "Sam", "s@e.com", t("2030-01-07T09:00:00Z"))) is BookingResult.EventTypeNotFound)
     }
+
+    @Test fun asymmetricBufferBlocksAdjacentBusyEvent() = runBlocking {
+        // bufferBefore=30min, bufferAfter=0: a busy event at [10:00,11:00] expands back to [09:30,11:00],
+        // which overlaps the [09:00,10:00] slot — booking should be SlotTaken.
+        val etAsym = EventType(UUID.randomUUID(), "intro", "Intro", Duration.ofMinutes(60),
+            Duration.ofMinutes(30), Duration.ZERO, EventTypeStatus.ACTIVE)
+        val store = CopyOnWriteArrayList<Pair<String, CalendarEvent>>()
+        // Pre-seed a busy event at [10:00,11:00]
+        store += "work" to CalendarEvent(
+            TimeInterval(t("2030-01-07T10:00:00Z"), t("2030-01-07T11:00:00Z")), "(busy)")
+        val provider = object : CalendarProvider {
+            override suspend fun busyIntervals(window: TimeInterval) =
+                store.filter { it.second.interval.overlaps(window) }.map { BusyInterval(it.second.interval, it.first) }
+        }
+        val writer = object : CalendarWriter {
+            override suspend fun createEvent(calendarId: String, event: CalendarEvent) { store += calendarId to event }
+        }
+        val h = BookSlotCommandHandler(
+            object : EventTypeRepository {
+                override suspend fun create(eventType: EventType) {}
+                override suspend fun list() = listOf(etAsym)
+                override suspend fun findBySlug(slug: String) = etAsym.takeIf { it.slug == slug }
+            },
+            object : SettingsRepository { override suspend fun load() = settings; override suspend fun save(settings: Settings) {} },
+            provider, writer,
+            object : ConnectedCalendarRepository {
+                override suspend fun list() = listOf(ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY"))
+                override suspend fun default() = ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY")
+            },
+            Clock.fixed(t("2020-01-01T00:00:00Z"), zone))
+        // Slot [09:00,10:00] should be blocked because the pre-buffer of the 10:00 busy event reaches 09:30
+        assertEquals(BookingResult.SlotTaken,
+            h.handle(BookSlotCommand("intro", "Sam", "sam@example.com", t("2030-01-07T09:00:00Z"))))
+    }
 }

@@ -42,7 +42,8 @@ class BookSlotCommandHandler(
         val rules = et.effectiveRules(settings)
         val end = command.start.plus(et.duration)
         return mutex.withLock {
-            val window = TimeInterval(command.start.minus(et.bufferBefore), end.plus(et.bufferAfter))
+            val pad = et.bufferBefore.plus(et.bufferAfter)
+            val window = TimeInterval(command.start.minus(pad), end.plus(pad))
             val busy = calendarProvider.busyIntervals(window)
             val open = engine.findSlots(rules, busy, SlotSearch(command.start, end, et.duration), clock.instant())
             if (open.none { it.start == command.start }) BookingResult.SlotTaken
