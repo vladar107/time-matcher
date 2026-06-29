@@ -88,3 +88,7 @@ fabric.properties
 # Editor-based Rest Client
 **/.idea/httpRequests
 
+# Superpowers workflow artifacts (brainstorming specs, plans, ledgers) — not project code
+docs/superpowers/
+.superpowers/
+

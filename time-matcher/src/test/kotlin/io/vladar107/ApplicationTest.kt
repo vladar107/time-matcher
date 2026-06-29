@@ -4,18 +4,15 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.testing.*
-import io.vladar107.web.plugins.configureRouting
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
 class ApplicationTest {
     @Test
-    fun testRoot() = testApplication {
-        application {
-            configureRouting()
-        }
-        client.get("/").apply {
-            assertEquals(HttpStatusCode.OK, status)
-            assertEquals("Hello World!", bodyAsText())
-        }
+    fun applicationModuleBootsAndServesMetrics() = testApplication {
+        application { module() }
+        // Smoke test: the module wires up (DI, monitoring, routing) and serves a stable route.
+        val response = client.get("/metrics-micrometer")
+        assertEquals(HttpStatusCode.OK, response.status)
     }
 }

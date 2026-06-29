@@ -4,3 +4,6 @@ ktor:
             - io.vladar107.ApplicationKt.module
     deployment:
         port: 8080
+
+db:
+    url: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"

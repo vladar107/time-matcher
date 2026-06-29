@@ -1,5 +1,9 @@
 C4 Container Diagram
 
+> Phase 1 (implemented): in-app availability finder — `GET /availability/slots` over in-memory calendars. External calendar sync, persistence, booking, and bots are later phases.
+
+> Phase 2a (implemented): EventTypes + booking. Config (settings, event types, connected calendars) in H2; bookings written to the calendar via the CalendarWriter port. Real Google calendar + host auth are later slices.
+
 ```mermaid
 C4Container
 title C4 Container Diagram
