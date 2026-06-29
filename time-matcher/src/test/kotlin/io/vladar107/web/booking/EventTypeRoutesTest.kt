@@ -29,4 +29,21 @@ class EventTypeRoutesTest {
         assertEquals(HttpStatusCode.OK, client.get("/event-types/intro").status)
         assertEquals(HttpStatusCode.NotFound, client.get("/event-types/missing").status)
     }
+
+    @Test fun duplicateSlugReturnsConflict() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to "jdbc:h2:mem:et-${java.util.UUID.randomUUID()};DB_CLOSE_DELAY=-1") }
+        application { module() }
+        val client = jsonClient()
+        val body = """{"slug":"dup","name":"Dup call","durationMinutes":30,"bufferBeforeMinutes":0,"bufferAfterMinutes":0}"""
+        val first = client.post("/event-types") {
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }
+        assertEquals(HttpStatusCode.Created, first.status)
+        val second = client.post("/event-types") {
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }
+        assertEquals(HttpStatusCode.Conflict, second.status)
+    }
 }

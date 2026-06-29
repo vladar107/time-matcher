@@ -32,6 +32,8 @@ fun Application.configureEventTypes() {
                     require(b.bufferBeforeMinutes >= 0 && b.bufferAfterMinutes >= 0) { "buffers must be non-negative" }
                     CreateEventTypeCommand(b.slug, b.name, Duration.ofMinutes(b.durationMinutes), Duration.ofMinutes(b.bufferBeforeMinutes), Duration.ofMinutes(b.bufferAfterMinutes))
                 } catch (e: Exception) { return@post call.respond(HttpStatusCode.BadRequest, "Invalid event type: ${e.message}") }
+                val existing: EventType? = queryProvider.query(GetEventTypeBySlugQuery(cmd.slug))
+                if (existing != null) return@post call.respond(HttpStatusCode.Conflict, "Slug already in use")
                 commandProvider.run(cmd); call.respond(HttpStatusCode.Created)
             }
             get { call.respond(queryProvider.query(ListEventTypesQuery()).map { it.toDto() }) }
