@@ -13,15 +13,16 @@
 - **All Gradle commands run from `time-matcher/`.** JDK 25 is keg-only: prefix every Gradle call with `JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home` and target the project dir, e.g.
   `JAVA_HOME=… /Users/vramazaev/src/time-matcher/time-matcher/gradlew -p /Users/vramazaev/src/time-matcher/time-matcher <task>`.
 - Source root: `time-matcher/src/main/kotlin/io/vladar107/`. Test root: `time-matcher/src/test/kotlin/io/vladar107/`. Resources: `time-matcher/src/main/resources/`.
-- **New dependencies (this slice):** H2 (`com.h2database:h2`), Flyway (`org.flywaydb:flyway-core` + `org.flywaydb:flyway-database-h2`), Exposed (`org.jetbrains.exposed:exposed-core` + `-jdbc` + the java-time module). Versions pinned in `gradle.properties`. **Their exact coordinates/versions MUST be verified empirically against Gradle 9.5 / Kotlin 2.4 / JDK 25 in Task 1** — Exposed 1.0 reorganized its modules/packages; if it causes friction, fall back to the latest Exposed 0.x (`exposed-core`/`exposed-jdbc`/`exposed-java-time`). Record the final working set.
-- **Add new `io.ktor:*` deps without a version** (the `ktor-bom` aligns them). This does NOT apply to H2/Flyway/Exposed — pin those.
+- **New dependencies (this slice):** H2 (`com.h2database:h2`), Flyway (`org.flywaydb:flyway-core` + `org.flywaydb:flyway-database-h2`), Exposed (`org.jetbrains.exposed:exposed-core` + `-jdbc` + the java-time module). Versions pinned in `gradle.properties`. **Their exact coordinates/versions MUST be verified empirically against Gradle 9.5 / Kotlin 2.4 / JDK 25 in Task 1** — Exposed 1.0 reorganized its modules/packages/query DSL; if it causes friction, fall back to the latest Exposed 0.x (`exposed-core`/`exposed-jdbc`/`exposed-java-time`). Record the final working set; later tasks' Exposed imports/query spellings follow whatever Task 1 pins.
+- **Add new `io.ktor:*` deps without a version** (the `ktor-bom` aligns them). Pin H2/Flyway/Exposed.
 - **Persistence is config-only.** Booked events are NEVER stored in the DB; they live in the calendar (the in-memory calendar adapter for this slice).
+- **DB URL.** Runtime uses H2 **file mode** via `db.url` in `application.yaml` (config persists across restarts — the user's explicit choice): `jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1`; add `data/` to `.gitignore`. **Tests override `db.url` to a unique in-memory H2 URL** via `testApplication` config so each test starts on a fresh schema. `Db.init` reconnects Exposed's global `Database`, so tests run sequentially — set `tasks.test { maxParallelForks = 1 }` in `build.gradle.kts`.
+- **Build stays green at every task boundary.** A task that changes or deletes a referenced symbol updates all references (DI bindings, controllers) in the same task, so `./gradlew build` compiles and passes after every task. New, not-yet-wired handler classes are fine (they compile unbound); binding + exposing them is the job of their web task.
 - **The Phase-1 `AvailabilityEngine` is not modified.** Only the assembly of its `AvailabilityRules` input changes.
-- **Stateful adapters are Kodein `singleton`** (DB repos, in-memory calendar, the booking lock/handler). Stateless handlers stay `provider`.
+- **Stateful adapters are Kodein `singleton`** (DB repos, in-memory calendar, the booking handler which holds a Mutex). Stateless handlers stay `provider`.
 - **Commits:** author `Vladislav Ramazaev <vladar107@gmail.com>`, NO co-author trailer:
   `git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" -m "…"`.
-- Branch: `feat/eventtypes-booking` (already created). Conventional commit prefixes.
-- Validate at the web boundary → 400; trust internal code below it.
+- Branch: `feat/eventtypes-booking` (already created). Conventional commit prefixes. Validate at the web boundary → 400.
 
 ---
 
@@ -30,26 +31,29 @@
 Stand up the config database and prove the H2/Flyway/Exposed stack works on the toolchain before any feature is built on it.
 
 **Files:**
-- Modify: `time-matcher/build.gradle.kts` (deps), `time-matcher/gradle.properties` (versions)
+- Modify: `time-matcher/build.gradle.kts` (deps + `tasks.test { maxParallelForks = 1 }`), `time-matcher/gradle.properties` (versions)
 - Create: `time-matcher/src/main/resources/db/migration/V1__init.sql`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/data/persistence/Database.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/data/persistence/Tables.kt`
+- Create: `time-matcher/src/main/kotlin/io/vladar107/data/persistence/Database.kt`, `…/data/persistence/Tables.kt`
 - Test: `time-matcher/src/test/kotlin/io/vladar107/data/persistence/DatabaseTest.kt`
 
 **Interfaces:**
-- Produces:
-  - `object Db { fun init(jdbcUrl: String, user: String = "sa", password: String = ""): Database }` — runs Flyway migrate then connects Exposed; returns the Exposed `Database`.
-  - Exposed tables in `Tables.kt`: `SettingsTable`, `WorkingHoursTable`, `DateOverrideTable`, `EventTypeTable`, `ConnectedCalendarTable` (column names match `V1__init.sql`).
+- Produces: `object Db { fun init(jdbcUrl: String, user: String = "sa", password: String = ""): Database }` (Flyway migrate then Exposed connect); Exposed tables `SettingsTable`, `WorkingHoursTable`, `DateOverrideTable`, `EventTypeTable`, `ConnectedCalendarTable` (columns match `V1__init.sql`).
 
-- [ ] **Step 1: Add dependencies**
+- [ ] **Step 1: Add dependencies + sequential tests**
 
-In `time-matcher/gradle.properties` append (verify/adjust in Step 4):
+`gradle.properties` (verify/adjust in Step 4):
 ```
 h2_version=2.3.232
 flyway_version=11.9.0
 exposed_version=1.0.0
 ```
-In `time-matcher/build.gradle.kts` `dependencies { }` add:
+`build.gradle.kts` — version vals at top alongside the existing ones:
+```kotlin
+val h2_version: String by project
+val flyway_version: String by project
+val exposed_version: String by project
+```
+`dependencies { }`:
 ```kotlin
     implementation("org.jetbrains.exposed:exposed-core:$exposed_version")
     implementation("org.jetbrains.exposed:exposed-jdbc:$exposed_version")
@@ -58,16 +62,12 @@ In `time-matcher/build.gradle.kts` `dependencies { }` add:
     implementation("org.flywaydb:flyway-core:$flyway_version")
     implementation("org.flywaydb:flyway-database-h2:$flyway_version")
 ```
-And declare the version vals at the top of `build.gradle.kts` next to the existing ones:
+At the bottom of `build.gradle.kts` (Exposed's global connection requires serial tests):
 ```kotlin
-val h2_version: String by project
-val flyway_version: String by project
-val exposed_version: String by project
+tasks.test { maxParallelForks = 1 }
 ```
 
-- [ ] **Step 2: Write the schema migration**
-
-`V1__init.sql`:
+- [ ] **Step 2: Write `V1__init.sql`**
 ```sql
 CREATE TABLE settings (
     id INT PRIMARY KEY,
@@ -75,46 +75,27 @@ CREATE TABLE settings (
     granularity_minutes INT NOT NULL,
     minimum_notice_minutes INT NOT NULL
 );
-
 CREATE TABLE working_hours (
-    id UUID PRIMARY KEY,
-    day_of_week VARCHAR(9) NOT NULL,
-    start_time VARCHAR(5) NOT NULL,
-    end_time VARCHAR(5) NOT NULL
+    id UUID PRIMARY KEY, day_of_week VARCHAR(9) NOT NULL,
+    start_time VARCHAR(5) NOT NULL, end_time VARCHAR(5) NOT NULL
 );
-
 CREATE TABLE date_override (
-    id UUID PRIMARY KEY,
-    override_date VARCHAR(10) NOT NULL,
-    start_time VARCHAR(5),
-    end_time VARCHAR(5)
+    id UUID PRIMARY KEY, override_date VARCHAR(10) NOT NULL,
+    start_time VARCHAR(5), end_time VARCHAR(5)
 );
-
 CREATE TABLE event_type (
-    id UUID PRIMARY KEY,
-    slug VARCHAR(128) NOT NULL UNIQUE,
-    name VARCHAR(256) NOT NULL,
-    duration_minutes INT NOT NULL,
-    buffer_before_minutes INT NOT NULL,
-    buffer_after_minutes INT NOT NULL,
-    status VARCHAR(16) NOT NULL
+    id UUID PRIMARY KEY, slug VARCHAR(128) NOT NULL UNIQUE, name VARCHAR(256) NOT NULL,
+    duration_minutes INT NOT NULL, buffer_before_minutes INT NOT NULL,
+    buffer_after_minutes INT NOT NULL, status VARCHAR(16) NOT NULL
 );
-
 CREATE TABLE connected_calendar (
-    id UUID PRIMARY KEY,
-    name VARCHAR(256) NOT NULL,
-    provider VARCHAR(32) NOT NULL,
-    created_at VARCHAR(64) NOT NULL
+    id UUID PRIMARY KEY, name VARCHAR(256) NOT NULL, provider VARCHAR(32) NOT NULL, created_at VARCHAR(64) NOT NULL
 );
-
--- Seed a single default settings row and one in-memory calendar.
-INSERT INTO settings (id, zone, granularity_minutes, minimum_notice_minutes)
-VALUES (1, 'Europe/Paris', 30, 0);
-
+INSERT INTO settings (id, zone, granularity_minutes, minimum_notice_minutes) VALUES (1, 'Europe/Paris', 30, 0);
 INSERT INTO connected_calendar (id, name, provider, created_at)
 VALUES ('00000000-0000-0000-0000-000000000001', 'Default', 'IN_MEMORY', '2026-06-29T00:00:00Z');
 ```
-Note: times stored as `HH:mm`/ISO strings keep the migration DB-agnostic and avoid driver time-mapping quirks; the repositories parse them to `java.time`.
+Times are stored as `HH:mm`/ISO strings (DB-agnostic; repos parse to `java.time`).
 
 - [ ] **Step 3: Implement `Tables.kt` and `Database.kt`**
 
@@ -125,45 +106,28 @@ package io.vladar107.data.persistence
 import org.jetbrains.exposed.sql.Table
 
 object SettingsTable : Table("settings") {
-    val id = integer("id")
-    val zone = varchar("zone", 64)
-    val granularityMinutes = integer("granularity_minutes")
-    val minimumNoticeMinutes = integer("minimum_notice_minutes")
+    val id = integer("id"); val zone = varchar("zone", 64)
+    val granularityMinutes = integer("granularity_minutes"); val minimumNoticeMinutes = integer("minimum_notice_minutes")
     override val primaryKey = PrimaryKey(id)
 }
-
 object WorkingHoursTable : Table("working_hours") {
-    val id = uuid("id")
-    val dayOfWeek = varchar("day_of_week", 9)
-    val startTime = varchar("start_time", 5)
-    val endTime = varchar("end_time", 5)
+    val id = uuid("id"); val dayOfWeek = varchar("day_of_week", 9)
+    val startTime = varchar("start_time", 5); val endTime = varchar("end_time", 5)
     override val primaryKey = PrimaryKey(id)
 }
-
 object DateOverrideTable : Table("date_override") {
-    val id = uuid("id")
-    val date = varchar("override_date", 10)
-    val startTime = varchar("start_time", 5).nullable()
-    val endTime = varchar("end_time", 5).nullable()
+    val id = uuid("id"); val date = varchar("override_date", 10)
+    val startTime = varchar("start_time", 5).nullable(); val endTime = varchar("end_time", 5).nullable()
     override val primaryKey = PrimaryKey(id)
 }
-
 object EventTypeTable : Table("event_type") {
-    val id = uuid("id")
-    val slug = varchar("slug", 128).uniqueIndex()
-    val name = varchar("name", 256)
-    val durationMinutes = integer("duration_minutes")
-    val bufferBeforeMinutes = integer("buffer_before_minutes")
-    val bufferAfterMinutes = integer("buffer_after_minutes")
-    val status = varchar("status", 16)
+    val id = uuid("id"); val slug = varchar("slug", 128).uniqueIndex(); val name = varchar("name", 256)
+    val durationMinutes = integer("duration_minutes"); val bufferBeforeMinutes = integer("buffer_before_minutes")
+    val bufferAfterMinutes = integer("buffer_after_minutes"); val status = varchar("status", 16)
     override val primaryKey = PrimaryKey(id)
 }
-
 object ConnectedCalendarTable : Table("connected_calendar") {
-    val id = uuid("id")
-    val name = varchar("name", 256)
-    val provider = varchar("provider", 32)
-    val createdAt = varchar("created_at", 64)
+    val id = uuid("id"); val name = varchar("name", 256); val provider = varchar("provider", 32); val createdAt = varchar("created_at", 64)
     override val primaryKey = PrimaryKey(id)
 }
 ```
@@ -182,7 +146,7 @@ object Db {
 }
 ```
 
-- [ ] **Step 4: Write the smoke test and verify the stack (adjust versions if needed)**
+- [ ] **Step 4: Smoke test + verify the stack (adjust versions/imports if needed)**
 
 `DatabaseTest.kt`:
 ```kotlin
@@ -194,11 +158,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class DatabaseTest {
-    @Test
-    fun migratesAndSeedsConfig() {
-        // Unique in-memory DB that stays alive for the connection.
-        val url = "jdbc:h2:mem:smoke;DB_CLOSE_DELAY=-1"
-        Db.init(url)
+    @Test fun migratesAndSeedsConfig() {
+        Db.init("jdbc:h2:mem:smoke;DB_CLOSE_DELAY=-1")
         transaction {
             assertEquals(1, SettingsTable.selectAll().count().toInt())
             assertEquals("Europe/Paris", SettingsTable.selectAll().single()[SettingsTable.zone])
@@ -207,10 +168,9 @@ class DatabaseTest {
     }
 }
 ```
-Run: `… gradlew -p … test --tests "io.vladar107.data.persistence.DatabaseTest"`
-Expected: PASS. **If dependency resolution or compilation fails** (Exposed 1.0 module/package names, Flyway H2 module, H2 version), adjust the versions in `gradle.properties` and the imports to the working combination (try the latest Exposed 0.x with `exposed-java-time` if 1.0 fights you), re-run until green, and note the final versions in the report. `selectAll()`/`transaction` import paths may differ slightly across Exposed versions — fix imports to match the resolved version.
+Run: `… gradlew -p … test --tests "io.vladar107.data.persistence.DatabaseTest"` → PASS. **If dependency resolution or compilation fails** (Exposed 1.0 module/package/query-DSL names, Flyway H2 module, H2 version), adjust `gradle.properties` versions and the imports/DSL to the working combination (try latest Exposed 0.x with `exposed-java-time` if 1.0 fights you), re-run until green, and record the final versions + any DSL spelling in the report.
 
-- [ ] **Step 5: Run the full build and commit**
+- [ ] **Step 5: Full build + commit**
 
 Run: `… gradlew -p … build` → BUILD SUCCESSFUL.
 ```bash
@@ -226,17 +186,12 @@ git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vlada
 
 ### Task 2: Booking domain + repository ports + effective-rules assembly
 
-Pure domain types for the booking world, the repository ports, and the function that merges Settings + EventType into the engine's `AvailabilityRules`.
-
 **Files:**
-- Create: `time-matcher/src/main/kotlin/io/vladar107/domain/booking/EventType.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/domain/booking/Settings.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/domain/booking/ConnectedCalendar.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/domain/booking/EffectiveRules.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/SettingsRepository.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/EventTypeRepository.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/ConnectedCalendarRepository.kt`
+- Create: `domain/booking/EventType.kt`, `domain/booking/Settings.kt`, `domain/booking/ConnectedCalendar.kt`, `domain/booking/EffectiveRules.kt`
+- Create: `application/booking/SettingsRepository.kt`, `application/booking/EventTypeRepository.kt`, `application/booking/ConnectedCalendarRepository.kt`
 - Test: `time-matcher/src/test/kotlin/io/vladar107/domain/booking/EffectiveRulesTest.kt`
+
+(All paths under `time-matcher/src/main/kotlin/io/vladar107/`.)
 
 **Interfaces:**
 - Consumes: `AvailabilityRules`, `WeeklyAvailability`, `DateOverride` (domain/availability).
@@ -250,13 +205,10 @@ Pure domain types for the booking world, the repository ports, and the function 
   - `interface EventTypeRepository { suspend fun create(eventType: EventType); suspend fun list(): List<EventType>; suspend fun findBySlug(slug: String): EventType? }`
   - `interface ConnectedCalendarRepository { suspend fun list(): List<ConnectedCalendar>; suspend fun default(): ConnectedCalendar }`
 
-- [ ] **Step 1: Write the failing test**
-
-`EffectiveRulesTest.kt`:
+- [ ] **Step 1: Write the failing test** — `EffectiveRulesTest.kt`:
 ```kotlin
 package io.vladar107.domain.booking
 
-import io.vladar107.domain.availability.DateOverride
 import io.vladar107.domain.availability.LocalTimeRange
 import io.vladar107.domain.availability.WeeklyAvailability
 import java.time.DayOfWeek
@@ -268,37 +220,28 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class EffectiveRulesTest {
-    @Test
-    fun mergesSettingsWithEventTypeDurationAndBuffers() {
+    @Test fun mergesSettingsWithEventTypeDurationAndBuffers() {
         val settings = Settings(
-            zone = ZoneId.of("Europe/Paris"),
-            weekly = WeeklyAvailability(mapOf(DayOfWeek.MONDAY to listOf(LocalTimeRange(LocalTime.of(9, 0), LocalTime.of(17, 0))))),
-            overrides = emptyList(),
-            granularity = Duration.ofMinutes(30),
-            minimumNotice = Duration.ofHours(2),
+            ZoneId.of("Europe/Paris"),
+            WeeklyAvailability(mapOf(DayOfWeek.MONDAY to listOf(LocalTimeRange(LocalTime.of(9, 0), LocalTime.of(17, 0))))),
+            emptyList(), Duration.ofMinutes(30), Duration.ofHours(2),
         )
-        val eventType = EventType(
-            id = UUID.randomUUID(), slug = "intro", name = "Intro",
-            duration = Duration.ofMinutes(45),
-            bufferBefore = Duration.ofMinutes(10), bufferAfter = Duration.ofMinutes(5),
-            status = EventTypeStatus.ACTIVE,
-        )
-        val rules = eventType.effectiveRules(settings)
+        val et = EventType(UUID.randomUUID(), "intro", "Intro", Duration.ofMinutes(45),
+            Duration.ofMinutes(10), Duration.ofMinutes(5), EventTypeStatus.ACTIVE)
+        val rules = et.effectiveRules(settings)
         assertEquals(settings.zone, rules.zone)
         assertEquals(settings.weekly, rules.weekly)
         assertEquals(settings.granularity, rules.granularity)
         assertEquals(settings.minimumNotice, rules.minimumNotice)
-        assertEquals(Duration.ofMinutes(10), rules.bufferBefore) // from the event type
-        assertEquals(Duration.ofMinutes(5), rules.bufferAfter)   // from the event type
+        assertEquals(Duration.ofMinutes(10), rules.bufferBefore)
+        assertEquals(Duration.ofMinutes(5), rules.bufferAfter)
     }
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run to verify it fails** — `… --tests "io.vladar107.domain.booking.EffectiveRulesTest"` → FAIL (unresolved).
 
-Run: `… gradlew -p … test --tests "io.vladar107.domain.booking.EffectiveRulesTest"` → FAIL (unresolved).
-
-- [ ] **Step 3: Implement the domain types and ports**
+- [ ] **Step 3: Implement domain + ports**
 
 `EventType.kt`:
 ```kotlin
@@ -310,13 +253,8 @@ import java.util.UUID
 enum class EventTypeStatus { ACTIVE, INACTIVE }
 
 data class EventType(
-    val id: UUID,
-    val slug: String,
-    val name: String,
-    val duration: Duration,
-    val bufferBefore: Duration,
-    val bufferAfter: Duration,
-    val status: EventTypeStatus,
+    val id: UUID, val slug: String, val name: String,
+    val duration: Duration, val bufferBefore: Duration, val bufferAfter: Duration, val status: EventTypeStatus,
 )
 ```
 `Settings.kt`:
@@ -329,11 +267,8 @@ import java.time.Duration
 import java.time.ZoneId
 
 data class Settings(
-    val zone: ZoneId,
-    val weekly: WeeklyAvailability,
-    val overrides: List<DateOverride>,
-    val granularity: Duration,
-    val minimumNotice: Duration,
+    val zone: ZoneId, val weekly: WeeklyAvailability, val overrides: List<DateOverride>,
+    val granularity: Duration, val minimumNotice: Duration,
 )
 ```
 `ConnectedCalendar.kt`:
@@ -352,12 +287,8 @@ import io.vladar107.domain.availability.AvailabilityRules
 
 /** Engine input for an event type: host-global Settings + this type's buffers. */
 fun EventType.effectiveRules(settings: Settings): AvailabilityRules = AvailabilityRules(
-    zone = settings.zone,
-    weekly = settings.weekly,
-    overrides = settings.overrides,
-    granularity = settings.granularity,
-    bufferBefore = bufferBefore,
-    bufferAfter = bufferAfter,
+    zone = settings.zone, weekly = settings.weekly, overrides = settings.overrides,
+    granularity = settings.granularity, bufferBefore = bufferBefore, bufferAfter = bufferAfter,
     minimumNotice = settings.minimumNotice,
 )
 ```
@@ -367,10 +298,7 @@ package io.vladar107.application.booking
 
 import io.vladar107.domain.booking.Settings
 
-interface SettingsRepository {
-    suspend fun load(): Settings
-    suspend fun save(settings: Settings)
-}
+interface SettingsRepository { suspend fun load(): Settings; suspend fun save(settings: Settings) }
 ```
 `EventTypeRepository.kt`:
 ```kotlin
@@ -390,15 +318,10 @@ package io.vladar107.application.booking
 
 import io.vladar107.domain.booking.ConnectedCalendar
 
-interface ConnectedCalendarRepository {
-    suspend fun list(): List<ConnectedCalendar>
-    suspend fun default(): ConnectedCalendar
-}
+interface ConnectedCalendarRepository { suspend fun list(): List<ConnectedCalendar>; suspend fun default(): ConnectedCalendar }
 ```
 
-- [ ] **Step 4: Run to verify pass, then commit**
-
-Run: `… gradlew -p … test --tests "io.vladar107.domain.booking.EffectiveRulesTest"` → PASS. Then `… gradlew -p … build`.
+- [ ] **Step 4: Verify pass + build + commit** — focused test PASS, then `… build`.
 ```bash
 git add time-matcher/src/main/kotlin/io/vladar107/domain/booking/ \
         time-matcher/src/main/kotlin/io/vladar107/application/booking/ \
@@ -411,36 +334,25 @@ git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vlada
 
 ### Task 3: Calendar events + CalendarWriter port + in-memory adapter stores events
 
-Generalize the calendar to store events (title + optional attendee), add a write port, and derive busy from stored events. A booked event therefore shows as busy.
-
 **Files:**
-- Create: `time-matcher/src/main/kotlin/io/vladar107/domain/availability/CalendarEvent.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/availability/CalendarWriter.kt`
-- Modify: `time-matcher/src/main/kotlin/io/vladar107/data/repositories/InMemoryCalendarProvider.kt`
+- Create: `domain/availability/CalendarEvent.kt`, `application/availability/CalendarWriter.kt`
+- Modify: `data/repositories/InMemoryCalendarProvider.kt`
 - Modify (test): `time-matcher/src/test/kotlin/io/vladar107/data/repositories/InMemoryCalendarProviderTest.kt`
 
 **Interfaces:**
-- Consumes: `TimeInterval`, `BusyInterval` (domain/availability); `CalendarProvider`, `CalendarBusyWriter` (existing ports).
 - Produces:
   - `data class CalendarEvent(val interval: TimeInterval, val title: String, val attendeeName: String? = null, val attendeeEmail: String? = null)`
   - `interface CalendarWriter { suspend fun createEvent(calendarId: String, event: CalendarEvent) }`
-  - `InMemoryCalendarProvider` now also implements `CalendarWriter`; stores `CalendarEvent`s; `addBusy` creates a titled "(busy)" event; `busyIntervals` derives from stored events.
+  - `InMemoryCalendarProvider` also implements `CalendarWriter`; stores `CalendarEvent`s; `addBusy` → titleless "(busy)" event; `busyIntervals` derives from stored events.
 
-- [ ] **Step 1: Add the failing test**
-
-Append to `InMemoryCalendarProviderTest.kt` (keep the existing union test):
+- [ ] **Step 1: Add the failing test** — append to `InMemoryCalendarProviderTest.kt` (keep the existing union test):
 ```kotlin
     @Test
     fun createdEventShowsAsBusy() = kotlinx.coroutines.runBlocking {
         val provider = InMemoryCalendarProvider()
-        provider.createEvent(
-            "work",
-            io.vladar107.domain.availability.CalendarEvent(
-                TimeInterval(java.time.Instant.parse("2030-01-07T10:00:00Z"), java.time.Instant.parse("2030-01-07T11:00:00Z")),
-                title = "Intro with Sam",
-                attendeeName = "Sam", attendeeEmail = "sam@example.com",
-            ),
-        )
+        provider.createEvent("work", io.vladar107.domain.availability.CalendarEvent(
+            TimeInterval(java.time.Instant.parse("2030-01-07T10:00:00Z"), java.time.Instant.parse("2030-01-07T11:00:00Z")),
+            title = "Intro with Sam", attendeeName = "Sam", attendeeEmail = "sam@example.com"))
         val window = TimeInterval(java.time.Instant.parse("2030-01-07T00:00:00Z"), java.time.Instant.parse("2030-01-07T23:59:59Z"))
         val busy = provider.busyIntervals(window)
         assertEquals(1, busy.size)
@@ -448,9 +360,7 @@ Append to `InMemoryCalendarProviderTest.kt` (keep the existing union test):
     }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `… gradlew -p … test --tests "io.vladar107.data.repositories.InMemoryCalendarProviderTest"` → FAIL (no `createEvent`/`CalendarEvent`).
+- [ ] **Step 2: Run to verify it fails** — `… --tests "io.vladar107.data.repositories.InMemoryCalendarProviderTest"` → FAIL.
 
 - [ ] **Step 3: Implement CalendarEvent + CalendarWriter**
 
@@ -460,10 +370,8 @@ package io.vladar107.domain.availability
 
 /** An entry on a calendar. A booking is a CalendarEvent with an attendee; manual busy has none. */
 data class CalendarEvent(
-    val interval: TimeInterval,
-    val title: String,
-    val attendeeName: String? = null,
-    val attendeeEmail: String? = null,
+    val interval: TimeInterval, val title: String,
+    val attendeeName: String? = null, val attendeeEmail: String? = null,
 )
 ```
 `CalendarWriter.kt`:
@@ -472,15 +380,10 @@ package io.vladar107.application.availability
 
 import io.vladar107.domain.availability.CalendarEvent
 
-/** Write port: create an event on a calendar (e.g. a booking). */
-interface CalendarWriter {
-    suspend fun createEvent(calendarId: String, event: CalendarEvent)
-}
+interface CalendarWriter { suspend fun createEvent(calendarId: String, event: CalendarEvent) }
 ```
 
-- [ ] **Step 4: Refactor `InMemoryCalendarProvider` to store events**
-
-Replace the file body:
+- [ ] **Step 4: Refactor `InMemoryCalendarProvider`**
 ```kotlin
 package io.vladar107.data.repositories
 
@@ -497,9 +400,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 class InMemoryCalendarProvider : CalendarProvider, CalendarBusyWriter, CalendarWriter {
     private val byCalendar = ConcurrentHashMap<String, CopyOnWriteArrayList<CalendarEvent>>()
 
-    override suspend fun addBusy(calendarId: String, interval: TimeInterval) {
+    override suspend fun addBusy(calendarId: String, interval: TimeInterval) =
         createEvent(calendarId, CalendarEvent(interval, title = "(busy)"))
-    }
 
     override suspend fun createEvent(calendarId: String, event: CalendarEvent) {
         byCalendar.computeIfAbsent(calendarId) { CopyOnWriteArrayList() }.add(event)
@@ -511,11 +413,9 @@ class InMemoryCalendarProvider : CalendarProvider, CalendarBusyWriter, CalendarW
         }
 }
 ```
-(`CopyOnWriteArrayList` also closes the Task-8/Phase-1 Minor about unsynchronized writes.)
+(`CopyOnWriteArrayList` also closes the Phase-1 Minor about unsynchronized writes.)
 
-- [ ] **Step 5: Run tests to verify pass, then commit**
-
-Run: `… gradlew -p … test --tests "io.vladar107.data.repositories.InMemoryCalendarProviderTest"` → PASS (both tests). Then `… gradlew -p … build`.
+- [ ] **Step 5: Verify pass + build + commit** — both calendar tests PASS, then `… build`.
 ```bash
 git add time-matcher/src/main/kotlin/io/vladar107/domain/availability/CalendarEvent.kt \
         time-matcher/src/main/kotlin/io/vladar107/application/availability/CalendarWriter.kt \
@@ -529,21 +429,15 @@ git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vlada
 
 ### Task 4: Exposed repositories (Settings, EventType, ConnectedCalendar)
 
-DB-backed adapters implementing the Task-2 ports, with H2 integration tests.
-
 **Files:**
-- Create: `time-matcher/src/main/kotlin/io/vladar107/data/repositories/ExposedSettingsRepository.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/data/repositories/ExposedEventTypeRepository.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/data/repositories/ExposedConnectedCalendarRepository.kt`
+- Create: `data/repositories/ExposedSettingsRepository.kt`, `ExposedEventTypeRepository.kt`, `ExposedConnectedCalendarRepository.kt`
 - Test: `time-matcher/src/test/kotlin/io/vladar107/data/repositories/ExposedRepositoriesTest.kt`
 
 **Interfaces:**
-- Consumes: ports + domain from Task 2; `Db`, tables from Task 1; `WeeklyAvailability`, `DateOverride`, `LocalTimeRange` (domain/availability).
-- Produces: `ExposedSettingsRepository`, `ExposedEventTypeRepository`, `ExposedConnectedCalendarRepository` (constructors take no args; they use the globally-connected Exposed `Database`).
+- Consumes: ports + domain (Task 2); `Db`, tables (Task 1).
+- Produces: `ExposedSettingsRepository`, `ExposedEventTypeRepository`, `ExposedConnectedCalendarRepository` (no-arg constructors; use the globally-connected Exposed `Database`).
 
-- [ ] **Step 1: Write the failing integration test**
-
-`ExposedRepositoriesTest.kt`:
+- [ ] **Step 1: Write the failing integration test** — `ExposedRepositoriesTest.kt`:
 ```kotlin
 package io.vladar107.data.repositories
 
@@ -571,16 +465,10 @@ class ExposedRepositoriesTest {
 
     @Test fun settingsRoundTrips() = runBlocking {
         val repo = ExposedSettingsRepository()
-        val seeded = repo.load() // from V1 seed
-        assertEquals(ZoneId.of("Europe/Paris"), seeded.zone)
-
-        val updated = Settings(
-            zone = ZoneId.of("UTC"),
-            weekly = WeeklyAvailability(mapOf(DayOfWeek.MONDAY to listOf(LocalTimeRange(LocalTime.of(9, 0), LocalTime.of(17, 0))))),
-            overrides = listOf(DateOverride(LocalDate.parse("2030-12-25"), emptyList())),
-            granularity = Duration.ofMinutes(15),
-            minimumNotice = Duration.ofHours(1),
-        )
+        assertEquals(ZoneId.of("Europe/Paris"), repo.load().zone) // seeded
+        val updated = Settings(ZoneId.of("UTC"),
+            WeeklyAvailability(mapOf(DayOfWeek.MONDAY to listOf(LocalTimeRange(LocalTime.of(9, 0), LocalTime.of(17, 0))))),
+            listOf(DateOverride(LocalDate.parse("2030-12-25"), emptyList())), Duration.ofMinutes(15), Duration.ofHours(1))
         repo.save(updated)
         val reloaded = repo.load()
         assertEquals(ZoneId.of("UTC"), reloaded.zone)
@@ -591,23 +479,19 @@ class ExposedRepositoriesTest {
 
     @Test fun eventTypeCreateListFind() = runBlocking {
         val repo = ExposedEventTypeRepository()
-        val et = EventType(UUID.randomUUID(), "intro", "Intro", Duration.ofMinutes(30), Duration.ZERO, Duration.ZERO, EventTypeStatus.ACTIVE)
-        repo.create(et)
+        repo.create(EventType(UUID.randomUUID(), "intro", "Intro", Duration.ofMinutes(30), Duration.ZERO, Duration.ZERO, EventTypeStatus.ACTIVE))
         assertEquals(1, repo.list().size)
         assertEquals("Intro", repo.findBySlug("intro")?.name)
         assertNull(repo.findBySlug("nope"))
     }
 
     @Test fun connectedCalendarHasSeededDefault() = runBlocking {
-        val repo = ExposedConnectedCalendarRepository()
-        assertEquals("IN_MEMORY", repo.default().provider)
+        assertEquals("IN_MEMORY", ExposedConnectedCalendarRepository().default().provider)
     }
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `… gradlew -p … test --tests "io.vladar107.data.repositories.ExposedRepositoriesTest"` → FAIL (unresolved repositories).
+- [ ] **Step 2: Run to verify it fails** — FAIL (unresolved repos).
 
 - [ ] **Step 3: Implement the repositories**
 
@@ -642,18 +526,12 @@ class ExposedSettingsRepository : SettingsRepository {
             .mapValues { (_, rows) -> rows.map { LocalTimeRange(LocalTime.parse(it[WorkingHoursTable.startTime]), LocalTime.parse(it[WorkingHoursTable.endTime])) } }
         val overrides = DateOverrideTable.selectAll().map {
             val s = it[DateOverrideTable.startTime]; val e = it[DateOverrideTable.endTime]
-            DateOverride(
-                LocalDate.parse(it[DateOverrideTable.date]),
-                if (s != null && e != null) listOf(LocalTimeRange(LocalTime.parse(s), LocalTime.parse(e))) else emptyList(),
-            )
+            DateOverride(LocalDate.parse(it[DateOverrideTable.date]),
+                if (s != null && e != null) listOf(LocalTimeRange(LocalTime.parse(s), LocalTime.parse(e))) else emptyList())
         }
-        Settings(
-            zone = ZoneId.of(row[SettingsTable.zone]),
-            weekly = WeeklyAvailability(weekly),
-            overrides = overrides,
-            granularity = Duration.ofMinutes(row[SettingsTable.granularityMinutes].toLong()),
-            minimumNotice = Duration.ofMinutes(row[SettingsTable.minimumNoticeMinutes].toLong()),
-        )
+        Settings(ZoneId.of(row[SettingsTable.zone]), WeeklyAvailability(weekly), overrides,
+            Duration.ofMinutes(row[SettingsTable.granularityMinutes].toLong()),
+            Duration.ofMinutes(row[SettingsTable.minimumNoticeMinutes].toLong()))
     }
 
     override suspend fun save(settings: Settings): Unit = transaction {
@@ -664,25 +542,17 @@ class ExposedSettingsRepository : SettingsRepository {
         }
         WorkingHoursTable.deleteAll()
         settings.weekly.byDay.forEach { (day, ranges) ->
-            ranges.forEach { r ->
-                WorkingHoursTable.insert {
-                    it[id] = UUID.randomUUID(); it[dayOfWeek] = day.name
-                    it[startTime] = r.start.toString(); it[endTime] = r.end.toString()
-                }
-            }
+            ranges.forEach { r -> WorkingHoursTable.insert {
+                it[id] = UUID.randomUUID(); it[dayOfWeek] = day.name; it[startTime] = r.start.toString(); it[endTime] = r.end.toString() } }
         }
         DateOverrideTable.deleteAll()
-        settings.overrides.forEach { o ->
-            DateOverrideTable.insert {
-                it[id] = UUID.randomUUID(); it[date] = o.date.toString()
-                it[startTime] = o.ranges.firstOrNull()?.start?.toString()
-                it[endTime] = o.ranges.firstOrNull()?.end?.toString()
-            }
-        }
+        settings.overrides.forEach { o -> DateOverrideTable.insert {
+            it[id] = UUID.randomUUID(); it[date] = o.date.toString()
+            it[startTime] = o.ranges.firstOrNull()?.start?.toString(); it[endTime] = o.ranges.firstOrNull()?.end?.toString() } }
     }
 }
 ```
-Note: `WeeklyAvailability` exposes `byDay: Map<DayOfWeek, List<LocalTimeRange>>` and `rangesFor(day)` (from Phase 1). An override row with null times = unavailable (empty ranges). (Multiple ranges per override date are out of scope here; the schema stores one range per override row — sufficient for 2a.)
+(`WeeklyAvailability.byDay` + `rangesFor(day)` exist from Phase 1. An override row with null times = unavailable. One range per override row is sufficient for 2a.)
 
 `ExposedEventTypeRepository.kt`:
 ```kotlin
@@ -700,12 +570,11 @@ import java.time.Duration
 
 class ExposedEventTypeRepository : EventTypeRepository {
     private fun map(r: ResultRow) = EventType(
-        id = r[EventTypeTable.id], slug = r[EventTypeTable.slug], name = r[EventTypeTable.name],
-        duration = Duration.ofMinutes(r[EventTypeTable.durationMinutes].toLong()),
-        bufferBefore = Duration.ofMinutes(r[EventTypeTable.bufferBeforeMinutes].toLong()),
-        bufferAfter = Duration.ofMinutes(r[EventTypeTable.bufferAfterMinutes].toLong()),
-        status = EventTypeStatus.valueOf(r[EventTypeTable.status]),
-    )
+        r[EventTypeTable.id], r[EventTypeTable.slug], r[EventTypeTable.name],
+        Duration.ofMinutes(r[EventTypeTable.durationMinutes].toLong()),
+        Duration.ofMinutes(r[EventTypeTable.bufferBeforeMinutes].toLong()),
+        Duration.ofMinutes(r[EventTypeTable.bufferAfterMinutes].toLong()),
+        EventTypeStatus.valueOf(r[EventTypeTable.status]))
 
     override suspend fun create(eventType: EventType): Unit = transaction {
         EventTypeTable.insert {
@@ -716,9 +585,7 @@ class ExposedEventTypeRepository : EventTypeRepository {
             it[status] = eventType.status.name
         }
     }
-
     override suspend fun list(): List<EventType> = transaction { EventTypeTable.selectAll().map(::map) }
-
     override suspend fun findBySlug(slug: String): EventType? = transaction {
         EventTypeTable.selectAll().where { EventTypeTable.slug eq slug }.singleOrNull()?.let(::map)
     }
@@ -741,11 +608,9 @@ class ExposedConnectedCalendarRepository : ConnectedCalendarRepository {
     override suspend fun default(): ConnectedCalendar = transaction { ConnectedCalendarTable.selectAll().first().let(::map) }
 }
 ```
-Note: `selectAll().where { }` / `singleOrNull()` API spelling may vary by Exposed version (resolved in Task 1) — match the working version's query DSL.
+(`selectAll().where { }` / `singleOrNull()` spelling follows the Exposed version pinned in Task 1.)
 
-- [ ] **Step 4: Run to verify pass, then commit**
-
-Run: `… gradlew -p … test --tests "io.vladar107.data.repositories.ExposedRepositoriesTest"` → PASS. Then `… gradlew -p … build`.
+- [ ] **Step 4: Verify pass + build + commit**
 ```bash
 git add time-matcher/src/main/kotlin/io/vladar107/data/repositories/Exposed*.kt \
         time-matcher/src/test/kotlin/io/vladar107/data/repositories/ExposedRepositoriesTest.kt
@@ -755,24 +620,28 @@ git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vlada
 
 ---
 
-### Task 5: Settings use case + rewire the generic finder to Settings
+### Task 5: Migrate config to the DB (Settings command, finder rewire, DI, controller) — keeps build green
 
-Replace Phase 1's in-memory `AvailabilityConfigRepository` with the DB-backed `SettingsRepository`: a `SetSettingsCommand`, and the generic `FindAvailableSlotsQueryHandler` sourced from Settings (zero buffers + query duration). Retire the now-obsolete config types.
+Replace Phase 1's in-memory `AvailabilityConfigRepository` with the DB-backed `SettingsRepository` end to end: a `SetSettingsCommand`, the generic finder sourced from Settings, **all DI rewiring**, the `PUT /availability/config` controller/DTO, runtime DB init in file mode, and removal of the obsolete config classes. This task touches DI + controller precisely so the full build stays green.
 
 **Files:**
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/SetSettingsCommandHandler.kt`
-- Modify: `time-matcher/src/main/kotlin/io/vladar107/application/availability/FindAvailableSlotsQueryHandler.kt`
+- Create: `application/booking/SetSettingsCommandHandler.kt`
+- Modify: `application/availability/FindAvailableSlotsQueryHandler.kt`
+- Modify: `web/availability/dto/AvailabilityConfigRequest.kt` (drop buffers; build `Settings`), `web/availability/AvailabilityController.kt` (persist Settings via `SetSettingsCommand`)
+- Modify: `web/di/ConfigureExternalServices.kt` (DB init from config + Clock), `ConfigureRepositories.kt` (settings/event-type/connected-calendar + CalendarWriter singletons; drop the old config binding), `ConfigureQueries.kt` (finder now takes `SettingsRepository`), `ConfigureCommands.kt` (drop `SetAvailabilityRules`, add `SetSettings`), `web/di/ConfigureDi.kt` (pass `Application` to `configureExternalServices`)
+- Modify: `src/main/resources/application.yaml` (`db.url` file mode), `.gitignore` (`data/`)
 - Delete: `application/availability/AvailabilityConfigRepository.kt`, `data/repositories/InMemoryAvailabilityConfigRepository.kt`, `application/availability/SetAvailabilityRulesCommandHandler.kt`
-- Modify (test): `time-matcher/src/test/kotlin/io/vladar107/application/availability/FindAvailableSlotsQueryHandlerTest.kt`
-- Test: `time-matcher/src/test/kotlin/io/vladar107/application/booking/SetSettingsCommandTest.kt`
+- Modify (test): `test/.../application/availability/FindAvailableSlotsQueryHandlerTest.kt`
+- Create (test): `test/.../application/booking/SetSettingsCommandTest.kt`, `test/.../web/availability/SettingsPersistenceTest.kt`
 
 **Interfaces:**
-- Consumes: `SettingsRepository`, `Settings` (Task 2); `AvailabilityEngine`, `SlotSearch`, `AvailableSlots`, `TimeInterval`, `CalendarProvider` (existing); `Command`/`CommandHandler`/`Query`/`QueryHandler` infra.
 - Produces:
   - `data class SetSettingsCommand(val settings: Settings) : Command<Unit>` + `SetSettingsCommandHandler(settingsRepository)`.
-  - `FindAvailableSlotsQueryHandler(calendarProvider, settingsRepository, clock, engine = AvailabilityEngine())` — builds rules from Settings with `bufferBefore=ZERO, bufferAfter=ZERO`, duration from the query; returns `AvailableSlots(settings.zone, slots)` (unchanged result type from Phase 1).
+  - `FindAvailableSlotsQueryHandler(calendarProvider, settingsRepository, clock, engine = AvailabilityEngine())` → builds rules from Settings with `bufferBefore=ZERO, bufferAfter=ZERO`, duration from the query; returns `AvailableSlots(settings.zone, slots)` (unchanged result type).
+  - `AvailabilityConfigRequest.toSettings(): Settings`.
+  - `fun DI.MainBuilder.configureExternalServices(application: Application)`.
 
-- [ ] **Step 1: Write/adjust the failing tests**
+- [ ] **Step 1: Failing unit tests**
 
 `SetSettingsCommandTest.kt`:
 ```kotlin
@@ -790,16 +659,14 @@ class SetSettingsCommandTest {
     @Test fun savesSettings() = runBlocking {
         var saved: Settings? = null
         val repo = object : SettingsRepository {
-            override suspend fun load() = error("unused")
-            override suspend fun save(settings: Settings) { saved = settings }
-        }
+            override suspend fun load() = error("unused"); override suspend fun save(settings: Settings) { saved = settings } }
         val s = Settings(ZoneId.of("UTC"), WeeklyAvailability(emptyMap()), emptyList(), Duration.ofMinutes(30), Duration.ZERO)
         SetSettingsCommandHandler(repo).handle(SetSettingsCommand(s))
         assertEquals(s, saved)
     }
 }
 ```
-Rewrite `FindAvailableSlotsQueryHandlerTest.kt` to use a fake `SettingsRepository` instead of the deleted `AvailabilityConfigRepository`:
+Rewrite `FindAvailableSlotsQueryHandlerTest.kt` to use a fake `SettingsRepository`:
 ```kotlin
 package io.vladar107.application.availability
 
@@ -821,18 +688,13 @@ import kotlin.test.assertEquals
 
 class FindAvailableSlotsQueryHandlerTest {
     private fun t(s: String) = Instant.parse(s)
-    private val settings = Settings(
-        ZoneId.of("UTC"),
+    private val settings = Settings(ZoneId.of("UTC"),
         WeeklyAvailability(mapOf(DayOfWeek.MONDAY to listOf(LocalTimeRange(LocalTime.of(9, 0), LocalTime.of(17, 0))))),
-        emptyList(), Duration.ofMinutes(30), Duration.ZERO,
-    )
+        emptyList(), Duration.ofMinutes(30), Duration.ZERO)
     private val settingsRepo = object : SettingsRepository {
-        override suspend fun load() = settings
-        override suspend fun save(settings: Settings) = error("unused")
-    }
+        override suspend fun load() = settings; override suspend fun save(settings: Settings) = error("unused") }
     private val provider = object : CalendarProvider {
-        override suspend fun busyIntervals(window: TimeInterval): List<BusyInterval> = emptyList()
-    }
+        override suspend fun busyIntervals(window: TimeInterval): List<BusyInterval> = emptyList() }
 
     @Test fun returnsSlotsInConfiguredZone() = runBlocking {
         val handler = FindAvailableSlotsQueryHandler(provider, settingsRepo, Clock.fixed(t("2020-01-01T00:00:00Z"), ZoneId.of("UTC")))
@@ -842,13 +704,10 @@ class FindAvailableSlotsQueryHandlerTest {
     }
 }
 ```
-(`AvailableSlots(zone, slots)` already exists from the Phase-1 zone-rendering fix.)
 
-- [ ] **Step 2: Run to verify failure**
+- [ ] **Step 2: Run to verify failure** — `… --tests "io.vladar107.application.booking.SetSettingsCommandTest"` → FAIL.
 
-Run: `… gradlew -p … test --tests "io.vladar107.application.booking.SetSettingsCommandTest"` → FAIL.
-
-- [ ] **Step 3: Implement `SetSettingsCommandHandler` and rewire the finder**
+- [ ] **Step 3: Implement command + finder rewire**
 
 `SetSettingsCommandHandler.kt`:
 ```kotlin
@@ -860,8 +719,7 @@ import io.vladar107.infrastructure.CommandHandler
 
 data class SetSettingsCommand(val settings: Settings) : Command<Unit>
 
-class SetSettingsCommandHandler(private val settingsRepository: SettingsRepository) :
-    CommandHandler<Unit, SetSettingsCommand> {
+class SetSettingsCommandHandler(private val settingsRepository: SettingsRepository) : CommandHandler<Unit, SetSettingsCommand> {
     override suspend fun handle(command: SetSettingsCommand) = settingsRepository.save(command.settings)
 }
 ```
@@ -897,79 +755,197 @@ class FindAvailableSlotsQueryHandler(
     }
 }
 ```
-Then **delete** `AvailabilityConfigRepository.kt`, `InMemoryAvailabilityConfigRepository.kt`, `SetAvailabilityRulesCommandHandler.kt`. (DI wiring for these is fixed in Task 8; the build will be red until then — that is expected for this task, so run only the focused unit tests here, not the full app.)
+Delete `AvailabilityConfigRepository.kt`, `InMemoryAvailabilityConfigRepository.kt`, `SetAvailabilityRulesCommandHandler.kt`.
 
-- [ ] **Step 4: Run the focused unit tests**
+- [ ] **Step 4: Update the config DTO + controller**
 
-Run: `… gradlew -p … test --tests "io.vladar107.application.booking.SetSettingsCommandTest" --tests "io.vladar107.application.availability.FindAvailableSlotsQueryHandlerTest"` → PASS.
-(Compilation of these test classes + their targets confirms the new shapes. The web/DI layer is updated in Task 8.)
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A time-matcher/src/main/kotlin/io/vladar107/application \
-          time-matcher/src/main/kotlin/io/vladar107/data/repositories \
-          time-matcher/src/test/kotlin/io/vladar107/application
-git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" \
-  -m "refactor: source settings from DB-backed SettingsRepository; add SetSettingsCommand"
-```
-
----
-
-### Task 6: EventType use cases (create / list / get)
-
-**Files:**
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/CreateEventTypeCommandHandler.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/ListEventTypesQueryHandler.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/GetEventTypeBySlugQueryHandler.kt`
-- Test: `time-matcher/src/test/kotlin/io/vladar107/application/booking/EventTypeUseCasesTest.kt`
-
-**Interfaces:**
-- Consumes: `EventTypeRepository`, `EventType`, `EventTypeStatus` (Task 2); infra Command/Query.
-- Produces:
-  - `data class CreateEventTypeCommand(val slug: String, val name: String, val duration: Duration, val bufferBefore: Duration, val bufferAfter: Duration) : Command<Unit>` + handler (assigns `UUID.randomUUID()`, status `ACTIVE`).
-  - `class ListEventTypesQuery : Query<List<EventType>>` + handler.
-  - `data class GetEventTypeBySlugQuery(val slug: String) : Query<EventType?>` + handler.
-
-- [ ] **Step 1: Write the failing test**
-
-`EventTypeUseCasesTest.kt`:
+Rewrite `AvailabilityConfigRequest.kt` (drop buffers; build `Settings`; keep `LocalTimeRangeDto`/`DateOverrideDto`):
 ```kotlin
-package io.vladar107.application.booking
+package io.vladar107.web.availability.dto
 
-import io.vladar107.domain.booking.EventType
-import kotlinx.coroutines.runBlocking
+import io.vladar107.domain.availability.DateOverride
+import io.vladar107.domain.availability.LocalTimeRange
+import io.vladar107.domain.availability.WeeklyAvailability
+import io.vladar107.domain.booking.Settings
+import kotlinx.serialization.Serializable
+import java.time.DayOfWeek
 import java.time.Duration
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+
+@Serializable data class LocalTimeRangeDto(val start: String, val end: String)
+@Serializable data class DateOverrideDto(val date: String, val ranges: List<LocalTimeRangeDto>)
+
+@Serializable
+data class AvailabilityConfigRequest(
+    val zone: String, val granularityMinutes: Long, val minimumNoticeMinutes: Long = 0,
+    val weekly: Map<String, List<LocalTimeRangeDto>> = emptyMap(),
+    val overrides: List<DateOverrideDto> = emptyList(),
+) {
+    fun toSettings(): Settings {
+        require(granularityMinutes > 0) { "granularityMinutes must be positive" }
+        require(minimumNoticeMinutes >= 0) { "minimumNoticeMinutes must be non-negative" }
+        fun range(d: LocalTimeRangeDto) = LocalTimeRange(LocalTime.parse(d.start), LocalTime.parse(d.end))
+        return Settings(
+            zone = ZoneId.of(zone),
+            weekly = WeeklyAvailability(weekly.entries.associate { (day, r) -> DayOfWeek.valueOf(day.uppercase()) to r.map(::range) }),
+            overrides = overrides.map { DateOverride(LocalDate.parse(it.date), it.ranges.map(::range)) },
+            granularity = Duration.ofMinutes(granularityMinutes), minimumNotice = Duration.ofMinutes(minimumNoticeMinutes),
+        )
+    }
+}
+```
+In `AvailabilityController.kt` change the `PUT /availability/config` body to build/run `SetSettingsCommand(call.receive<AvailabilityConfigRequest>().toSettings())` inside the existing try/catch→400, respond `204`. Update imports (drop `SetAvailabilityRulesCommand`; add `SetSettingsCommand` + `AvailabilityConfigRequest`). Leave `GET /availability/slots` and `POST /calendars/{id}/busy` unchanged (the `AvailableSlots`→`SlotDto` mapping is unchanged).
+
+- [ ] **Step 5: Rewire DI + runtime DB (file mode)**
+
+`ConfigureExternalServices.kt`:
+```kotlin
+package io.vladar107.web.di
+
+import io.ktor.server.application.*
+import io.vladar107.data.persistence.Db
+import org.kodein.di.DI
+import org.kodein.di.bind
+import org.kodein.di.singleton
+import java.time.Clock
+
+fun DI.MainBuilder.configureExternalServices(application: Application) {
+    val url = application.environment.config.propertyOrNull("db.url")?.getString()
+        ?: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+    Db.init(url)
+    bind<Clock>() with singleton { Clock.systemDefaultZone() }
+}
+```
+In `ConfigureDi.kt`, change the call to `configureExternalServices(this@configureDi)`.
+`ConfigureRepositories.kt` (keep the `UserCreationRepository` binding; replace the old config binding):
+```kotlin
+    bind<InMemoryCalendarProvider>() with singleton { InMemoryCalendarProvider() }
+    bind<CalendarProvider>() with singleton { instance<InMemoryCalendarProvider>() }
+    bind<CalendarBusyWriter>() with singleton { instance<InMemoryCalendarProvider>() }
+    bind<CalendarWriter>() with singleton { instance<InMemoryCalendarProvider>() }
+    bind<SettingsRepository>() with singleton { ExposedSettingsRepository() }
+    bind<EventTypeRepository>() with singleton { ExposedEventTypeRepository() }
+    bind<ConnectedCalendarRepository>() with singleton { ExposedConnectedCalendarRepository() }
+```
+`ConfigureQueries.kt` — rebind the finder with the settings repo (and keep it returning `AvailableSlots`):
+```kotlin
+    bind<QueryHandler<AvailableSlots, FindAvailableSlotsQuery>>() with provider {
+        FindAvailableSlotsQueryHandler(instance(), instance(), instance())
+    }
+```
+`ConfigureCommands.kt` — keep the user command; replace the settings command:
+```kotlin
+    bind<CommandHandler<Unit, SetSettingsCommand>>() with provider { SetSettingsCommandHandler(instance()) }
+```
+`application.yaml` — add:
+```yaml
+db:
+    url: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+```
+`.gitignore` — add `data/`.
+
+- [ ] **Step 6: Integration test — config persists + finder works on the DB**
+
+`SettingsPersistenceTest.kt` (override `db.url` to a unique in-memory DB):
+```kotlin
+package io.vladar107.web.availability
+
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.server.config.*
+import io.ktor.server.testing.*
+import io.vladar107.module
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 
-class EventTypeUseCasesTest {
-    private class FakeRepo : EventTypeRepository {
-        val items = mutableListOf<EventType>()
-        override suspend fun create(eventType: EventType) { items += eventType }
-        override suspend fun list() = items.toList()
-        override suspend fun findBySlug(slug: String) = items.firstOrNull { it.slug == slug }
-    }
-
-    @Test fun createsActiveEventType() = runBlocking {
-        val repo = FakeRepo()
-        CreateEventTypeCommandHandler(repo).handle(
-            CreateEventTypeCommand("intro", "Intro", Duration.ofMinutes(30), Duration.ofMinutes(5), Duration.ofMinutes(5)))
-        val created = repo.list().single()
-        assertEquals("intro", created.slug)
-        assertEquals(io.vladar107.domain.booking.EventTypeStatus.ACTIVE, created.status)
-        assertEquals(Duration.ofMinutes(30), created.duration)
-        assertEquals("Intro", GetEventTypeBySlugQueryHandler(repo).handle(GetEventTypeBySlugQuery("intro"))?.name)
-        assertNull(GetEventTypeBySlugQueryHandler(repo).handle(GetEventTypeBySlugQuery("none")))
-        assertEquals(1, ListEventTypesQueryHandler(repo).handle(ListEventTypesQuery()).size)
+class SettingsPersistenceTest {
+    @Test fun putConfigPersistsAndDrivesSlots() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to "jdbc:h2:mem:settings-test;DB_CLOSE_DELAY=-1") }
+        application { module() }
+        val put = client.put("/availability/config") {
+            header(HttpHeaders.ContentType, "application/json")
+            setBody("""{"zone":"UTC","granularityMinutes":60,"weekly":{"MONDAY":[{"start":"09:00","end":"17:00"}]},"overrides":[]}""")
+        }
+        assertEquals(HttpStatusCode.NoContent, put.status)
+        val slots = client.get("/availability/slots") {
+            parameter("from", "2030-01-07T00:00:00Z"); parameter("to", "2030-01-07T23:59:59Z"); parameter("duration", "PT1H")
+        }
+        assertEquals(HttpStatusCode.OK, slots.status)
+        assert(slots.bodyAsText().contains("2030-01-07T09:00:00Z"))
     }
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `… --tests "io.vladar107.application.booking.EventTypeUseCasesTest"` → FAIL.
+- [ ] **Step 7: Full build (green) + commit**
 
-- [ ] **Step 3: Implement the handlers**
+Run: `… gradlew -p … build` → BUILD SUCCESSFUL (all suites). Commit:
+```bash
+git add -A time-matcher/src/main/kotlin/io/vladar107 time-matcher/src/main/resources/application.yaml \
+          time-matcher/.gitignore time-matcher/src/test/kotlin/io/vladar107
+git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" \
+  -m "refactor: migrate settings to DB (SetSettings + finder + DI + file-mode H2)"
+```
+
+---
+
+### Task 6: EventType endpoints (use cases + DI + controller)
+
+Adds the event-type use cases, binds them, and exposes host endpoints. Ends green with an integration test.
+
+**Files:**
+- Create: `application/booking/CreateEventTypeCommandHandler.kt`, `ListEventTypesQueryHandler.kt`, `GetEventTypeBySlugQueryHandler.kt`
+- Create: `web/booking/dto/EventTypeDto.kt`, `web/booking/EventTypeController.kt`
+- Modify: `web/di/ConfigureCommands.kt`, `ConfigureQueries.kt`, `Application.kt` (register `configureEventTypes`)
+- Test: `test/.../web/booking/EventTypeRoutesTest.kt`
+
+**Interfaces:**
+- Produces:
+  - `data class CreateEventTypeCommand(slug, name, duration, bufferBefore, bufferAfter) : Command<Unit>` + handler (assigns `UUID.randomUUID()`, status `ACTIVE`).
+  - `class ListEventTypesQuery : Query<List<EventType>>` + handler; `data class GetEventTypeBySlugQuery(slug) : Query<EventType?>` + handler.
+  - `fun Application.configureEventTypes()`.
+
+- [ ] **Step 1: Failing integration test** — `EventTypeRoutesTest.kt`:
+```kotlin
+package io.vladar107.web.booking
+
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.config.*
+import io.ktor.server.testing.*
+import io.vladar107.module
+import kotlinx.serialization.json.Json
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class EventTypeRoutesTest {
+    private fun ApplicationTestBuilder.jsonClient() = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+
+    @Test fun createsAndListsEventTypes() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to "jdbc:h2:mem:et-test;DB_CLOSE_DELAY=-1") }
+        application { module() }
+        val client = jsonClient()
+        val create = client.post("/event-types") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"slug":"intro","name":"Intro call","durationMinutes":30,"bufferBeforeMinutes":0,"bufferAfterMinutes":0}""")
+        }
+        assertEquals(HttpStatusCode.Created, create.status)
+        assertTrue(client.get("/event-types").bodyAsText().contains("intro"))
+        assertEquals(HttpStatusCode.OK, client.get("/event-types/intro").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/event-types/missing").status)
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails** — FAIL.
+
+- [ ] **Step 3: Implement the use cases**
 
 `CreateEventTypeCommandHandler.kt`:
 ```kotlin
@@ -983,17 +959,12 @@ import java.time.Duration
 import java.util.UUID
 
 data class CreateEventTypeCommand(
-    val slug: String, val name: String,
-    val duration: Duration, val bufferBefore: Duration, val bufferAfter: Duration,
+    val slug: String, val name: String, val duration: Duration, val bufferBefore: Duration, val bufferAfter: Duration,
 ) : Command<Unit>
 
-class CreateEventTypeCommandHandler(private val repository: EventTypeRepository) :
-    CommandHandler<Unit, CreateEventTypeCommand> {
-    override suspend fun handle(command: CreateEventTypeCommand) {
-        repository.create(
-            EventType(UUID.randomUUID(), command.slug, command.name, command.duration,
-                command.bufferBefore, command.bufferAfter, EventTypeStatus.ACTIVE))
-    }
+class CreateEventTypeCommandHandler(private val repository: EventTypeRepository) : CommandHandler<Unit, CreateEventTypeCommand> {
+    override suspend fun handle(command: CreateEventTypeCommand) = repository.create(
+        EventType(UUID.randomUUID(), command.slug, command.name, command.duration, command.bufferBefore, command.bufferAfter, EventTypeStatus.ACTIVE))
 }
 ```
 `ListEventTypesQueryHandler.kt`:
@@ -1005,9 +976,7 @@ import io.vladar107.infrastructure.Query
 import io.vladar107.infrastructure.QueryHandler
 
 class ListEventTypesQuery : Query<List<EventType>>
-
-class ListEventTypesQueryHandler(private val repository: EventTypeRepository) :
-    QueryHandler<List<EventType>, ListEventTypesQuery> {
+class ListEventTypesQueryHandler(private val repository: EventTypeRepository) : QueryHandler<List<EventType>, ListEventTypesQuery> {
     override suspend fun handle(query: ListEventTypesQuery): List<EventType> = repository.list()
 }
 ```
@@ -1020,44 +989,102 @@ import io.vladar107.infrastructure.Query
 import io.vladar107.infrastructure.QueryHandler
 
 data class GetEventTypeBySlugQuery(val slug: String) : Query<EventType?>
-
-class GetEventTypeBySlugQueryHandler(private val repository: EventTypeRepository) :
-    QueryHandler<EventType?, GetEventTypeBySlugQuery> {
+class GetEventTypeBySlugQueryHandler(private val repository: EventTypeRepository) : QueryHandler<EventType?, GetEventTypeBySlugQuery> {
     override suspend fun handle(query: GetEventTypeBySlugQuery): EventType? = repository.findBySlug(query.slug)
 }
 ```
 
-- [ ] **Step 4: Run to verify pass, then commit** (focused test passes; full build still red until Task 8)
+- [ ] **Step 4: DTO + controller + DI + register**
 
+`EventTypeDto.kt`:
+```kotlin
+package io.vladar107.web.booking.dto
+
+import kotlinx.serialization.Serializable
+
+@Serializable data class CreateEventTypeRequest(
+    val slug: String, val name: String, val durationMinutes: Long, val bufferBeforeMinutes: Long = 0, val bufferAfterMinutes: Long = 0)
+@Serializable data class EventTypeDto(
+    val id: String, val slug: String, val name: String,
+    val durationMinutes: Long, val bufferBeforeMinutes: Long, val bufferAfterMinutes: Long, val status: String)
+```
+`EventTypeController.kt`:
+```kotlin
+package io.vladar107.web.booking
+
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.vladar107.application.booking.CreateEventTypeCommand
+import io.vladar107.application.booking.GetEventTypeBySlugQuery
+import io.vladar107.application.booking.ListEventTypesQuery
+import io.vladar107.domain.booking.EventType
+import io.vladar107.infrastructure.CommandProvider
+import io.vladar107.infrastructure.QueryProvider
+import io.vladar107.web.booking.dto.CreateEventTypeRequest
+import io.vladar107.web.booking.dto.EventTypeDto
+import org.kodein.di.instance
+import org.kodein.di.ktor.closestDI
+import java.time.Duration
+
+private fun EventType.toDto() = EventTypeDto(id.toString(), slug, name, duration.toMinutes(), bufferBefore.toMinutes(), bufferAfter.toMinutes(), status.name)
+
+fun Application.configureEventTypes() {
+    val commandProvider by closestDI { this@configureEventTypes }.instance<CommandProvider>()
+    val queryProvider by closestDI { this@configureEventTypes }.instance<QueryProvider>()
+    routing {
+        route("/event-types") {
+            post {
+                val cmd = try {
+                    val b = call.receive<CreateEventTypeRequest>()
+                    require(b.slug.isNotBlank() && b.name.isNotBlank()) { "slug and name required" }
+                    require(b.durationMinutes > 0) { "durationMinutes must be positive" }
+                    require(b.bufferBeforeMinutes >= 0 && b.bufferAfterMinutes >= 0) { "buffers must be non-negative" }
+                    CreateEventTypeCommand(b.slug, b.name, Duration.ofMinutes(b.durationMinutes), Duration.ofMinutes(b.bufferBeforeMinutes), Duration.ofMinutes(b.bufferAfterMinutes))
+                } catch (e: Exception) { return@post call.respond(HttpStatusCode.BadRequest, "Invalid event type: ${e.message}") }
+                commandProvider.run(cmd); call.respond(HttpStatusCode.Created)
+            }
+            get { call.respond(queryProvider.query(ListEventTypesQuery()).map { it.toDto() }) }
+            get("/{slug}") {
+                val et: EventType? = queryProvider.query(GetEventTypeBySlugQuery(call.parameters["slug"]!!))
+                if (et == null) call.respond(HttpStatusCode.NotFound, "Unknown event type") else call.respond(et.toDto())
+            }
+        }
+    }
+}
+```
+DI: in `ConfigureCommands.kt` add `bind<CommandHandler<Unit, CreateEventTypeCommand>>() with provider { CreateEventTypeCommandHandler(instance()) }`; in `ConfigureQueries.kt` add `bind<QueryHandler<List<EventType>, ListEventTypesQuery>>() with provider { ListEventTypesQueryHandler(instance()) }` and `bind<QueryHandler<EventType?, GetEventTypeBySlugQuery>>() with provider { GetEventTypeBySlugQueryHandler(instance()) }`. In `Application.kt` add `configureEventTypes()` to `module()`.
+
+- [ ] **Step 5: Full build (green) + commit**
 ```bash
-git add time-matcher/src/main/kotlin/io/vladar107/application/booking/CreateEventTypeCommandHandler.kt \
-        time-matcher/src/main/kotlin/io/vladar107/application/booking/ListEventTypesQueryHandler.kt \
-        time-matcher/src/main/kotlin/io/vladar107/application/booking/GetEventTypeBySlugQueryHandler.kt \
-        time-matcher/src/test/kotlin/io/vladar107/application/booking/EventTypeUseCasesTest.kt
+git add time-matcher/src/main/kotlin/io/vladar107/application/booking \
+        time-matcher/src/main/kotlin/io/vladar107/web/booking time-matcher/src/main/kotlin/io/vladar107/web/di \
+        time-matcher/src/main/kotlin/io/vladar107/Application.kt \
+        time-matcher/src/test/kotlin/io/vladar107/web/booking/EventTypeRoutesTest.kt
 git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" \
-  -m "feat: add event-type create/list/get use cases"
+  -m "feat: event-type create/list/get use cases + host endpoints"
 ```
 
 ---
 
-### Task 7: Booking use cases (per-type slots + book-with-double-booking-guard)
+### Task 7: Booking endpoints (per-type slots + book with double-booking guard)
 
 **Files:**
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/FindEventTypeSlotsQueryHandler.kt`
-- Create: `time-matcher/src/main/kotlin/io/vladar107/application/booking/BookSlotCommandHandler.kt`
-- Test: `time-matcher/src/test/kotlin/io/vladar107/application/booking/BookSlotCommandTest.kt`
+- Create: `application/booking/FindEventTypeSlotsQueryHandler.kt`, `BookSlotCommandHandler.kt`
+- Create: `web/booking/dto/BookingDto.kt`, `web/booking/BookingController.kt`
+- Modify: `web/di/ConfigureQueries.kt`, `ConfigureCommands.kt`, `Application.kt` (register `configureBooking`)
+- Test: `test/.../application/booking/BookSlotCommandTest.kt`, `test/.../web/booking/BookingRoutesTest.kt`
 
 **Interfaces:**
-- Consumes: `EventTypeRepository`, `SettingsRepository`, `ConnectedCalendarRepository` (Task 2); `CalendarProvider`, `CalendarWriter`, `CalendarEvent`, `AvailableSlots`, `AvailabilityEngine`, `SlotSearch`, `TimeInterval` (availability); `effectiveRules` (Task 2).
 - Produces:
-  - `data class FindEventTypeSlotsQuery(val slug: String, val from: Instant, val to: Instant) : Query<AvailableSlots?>` + handler (null if missing/inactive).
-  - `sealed interface BookingResult { data class Booked(val start: Instant, val end: Instant, val eventTypeName: String, val zone: ZoneId) : BookingResult; data object SlotTaken : BookingResult; data object EventTypeNotFound : BookingResult }`
-  - `data class BookSlotCommand(val slug: String, val attendeeName: String, val attendeeEmail: String, val start: Instant) : Command<BookingResult>`
-  - `class BookSlotCommandHandler(eventTypeRepository, settingsRepository, calendarProvider, calendarWriter, connectedCalendarRepository, clock, engine = AvailabilityEngine())` — bound as a **singleton** (holds a `Mutex`).
+  - `data class FindEventTypeSlotsQuery(slug, from, to) : Query<AvailableSlots?>` + handler (null if missing/inactive).
+  - `sealed interface BookingResult { data class Booked(start, end, eventTypeName, zone) ; data object SlotTaken ; data object EventTypeNotFound }`
+  - `data class BookSlotCommand(slug, attendeeName, attendeeEmail, start) : Command<BookingResult>` + `BookSlotCommandHandler(...)` — **bound as singleton** (holds a `Mutex`).
+  - `fun Application.configureBooking()`.
 
-- [ ] **Step 1: Write the failing test**
-
-`BookSlotCommandTest.kt`:
+- [ ] **Step 1: Failing unit test** — `BookSlotCommandTest.kt`:
 ```kotlin
 package io.vladar107.application.booking
 
@@ -1097,50 +1124,39 @@ class BookSlotCommandTest {
         val store = CopyOnWriteArrayList<Pair<String, CalendarEvent>>()
         val provider = object : CalendarProvider {
             override suspend fun busyIntervals(window: TimeInterval) =
-                store.filter { it.second.interval.overlaps(window) }.map { BusyInterval(it.second.interval, it.first) }
-        }
+                store.filter { it.second.interval.overlaps(window) }.map { BusyInterval(it.second.interval, it.first) } }
         val writer = object : CalendarWriter {
-            override suspend fun createEvent(calendarId: String, event: CalendarEvent) { store += calendarId to event; written += calendarId to event }
-        }
+            override suspend fun createEvent(calendarId: String, event: CalendarEvent) { store += calendarId to event; written += calendarId to event } }
         return BookSlotCommandHandler(
-            eventTypeRepository = object : EventTypeRepository {
-                override suspend fun create(eventType: EventType) {}
-                override suspend fun list() = listOf(et)
-                override suspend fun findBySlug(slug: String) = et.takeIf { it.slug == slug }
-            },
-            settingsRepository = object : SettingsRepository {
-                override suspend fun load() = settings; override suspend fun save(settings: Settings) {}
-            },
-            calendarProvider = provider, calendarWriter = writer,
-            connectedCalendarRepository = object : ConnectedCalendarRepository {
+            object : EventTypeRepository {
+                override suspend fun create(eventType: EventType) {}; override suspend fun list() = listOf(et)
+                override suspend fun findBySlug(slug: String) = et.takeIf { it.slug == slug } },
+            object : SettingsRepository { override suspend fun load() = settings; override suspend fun save(settings: Settings) {} },
+            provider, writer,
+            object : ConnectedCalendarRepository {
                 override suspend fun list() = listOf(ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY"))
-                override suspend fun default() = ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY")
-            },
-            clock = Clock.fixed(t("2020-01-01T00:00:00Z"), zone),
-        )
+                override suspend fun default() = ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY") },
+            Clock.fixed(t("2020-01-01T00:00:00Z"), zone))
     }
 
     @Test fun booksThenSecondBookingOfSameSlotIsTaken() = runBlocking {
         val written = CopyOnWriteArrayList<Pair<String, CalendarEvent>>()
         val h = handler(written)
-        val first = h.handle(BookSlotCommand("intro", "Sam", "sam@example.com", t("2030-01-07T09:00:00Z")))
-        assertTrue(first is BookingResult.Booked)
+        assertTrue(h.handle(BookSlotCommand("intro", "Sam", "sam@example.com", t("2030-01-07T09:00:00Z"))) is BookingResult.Booked)
         assertEquals(1, written.size)
-        val second = h.handle(BookSlotCommand("intro", "Pat", "pat@example.com", t("2030-01-07T09:00:00Z")))
-        assertTrue(second is BookingResult.SlotTaken)
-        assertEquals(1, written.size) // no second write
+        assertTrue(h.handle(BookSlotCommand("intro", "Pat", "pat@example.com", t("2030-01-07T09:00:00Z"))) is BookingResult.SlotTaken)
+        assertEquals(1, written.size)
     }
 
     @Test fun unknownSlugIsNotFound() = runBlocking {
-        val h = handler(CopyOnWriteArrayList())
-        assertTrue(h.handle(BookSlotCommand("nope", "Sam", "s@e.com", t("2030-01-07T09:00:00Z"))) is BookingResult.EventTypeNotFound)
+        assertTrue(handler(CopyOnWriteArrayList()).handle(BookSlotCommand("nope", "Sam", "s@e.com", t("2030-01-07T09:00:00Z"))) is BookingResult.EventTypeNotFound)
     }
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails** — FAIL (unresolved).
+- [ ] **Step 2: Run to verify it fails** — FAIL.
 
-- [ ] **Step 3: Implement the handlers**
+- [ ] **Step 3: Implement the booking use cases**
 
 `FindEventTypeSlotsQueryHandler.kt`:
 ```kotlin
@@ -1170,9 +1186,8 @@ class FindEventTypeSlotsQueryHandler(
     override suspend fun handle(query: FindEventTypeSlotsQuery): AvailableSlots? {
         val et = eventTypeRepository.findBySlug(query.slug)?.takeIf { it.status == EventTypeStatus.ACTIVE } ?: return null
         val settings = settingsRepository.load()
-        val rules = et.effectiveRules(settings)
         val busy = calendarProvider.busyIntervals(TimeInterval(query.from, query.to))
-        val slots = engine.findSlots(rules, busy, SlotSearch(query.from, query.to, et.duration), clock.instant())
+        val slots = engine.findSlots(et.effectiveRules(settings), busy, SlotSearch(query.from, query.to, et.duration), clock.instant())
         return AvailableSlots(settings.zone, slots)
     }
 }
@@ -1203,9 +1218,7 @@ sealed interface BookingResult {
     data object EventTypeNotFound : BookingResult
 }
 
-data class BookSlotCommand(
-    val slug: String, val attendeeName: String, val attendeeEmail: String, val start: Instant,
-) : Command<BookingResult>
+data class BookSlotCommand(val slug: String, val attendeeName: String, val attendeeEmail: String, val start: Instant) : Command<BookingResult>
 
 class BookSlotCommandHandler(
     private val eventTypeRepository: EventTypeRepository,
@@ -1224,334 +1237,23 @@ class BookSlotCommandHandler(
         val settings = settingsRepository.load()
         val rules = et.effectiveRules(settings)
         val end = command.start.plus(et.duration)
-
         return mutex.withLock {
-            // Fetch busy slightly wider than the slot so buffer-overlapping events are considered.
             val window = TimeInterval(command.start.minus(et.bufferBefore), end.plus(et.bufferAfter))
             val busy = calendarProvider.busyIntervals(window)
             val open = engine.findSlots(rules, busy, SlotSearch(command.start, end, et.duration), clock.instant())
-            if (open.none { it.start == command.start }) {
-                BookingResult.SlotTaken
-            } else {
+            if (open.none { it.start == command.start }) BookingResult.SlotTaken
+            else {
                 val calendarId = connectedCalendarRepository.default().id.toString()
-                calendarWriter.createEvent(
-                    calendarId,
-                    CalendarEvent(TimeInterval(command.start, end), "${et.name} with ${command.attendeeName}", command.attendeeName, command.attendeeEmail),
-                )
+                calendarWriter.createEvent(calendarId,
+                    CalendarEvent(TimeInterval(command.start, end), "${et.name} with ${command.attendeeName}", command.attendeeName, command.attendeeEmail))
                 BookingResult.Booked(command.start, end, et.name, settings.zone)
             }
         }
     }
 }
 ```
-Note: `kotlinx.coroutines.sync.Mutex` is available via Ktor's transitive coroutines (same as `runBlocking`). The mutex makes validate-then-write atomic, so the second booking sees the first as busy.
 
-- [ ] **Step 4: Run to verify pass, then commit** (focused tests pass; full build still red until Task 8)
-
-```bash
-git add time-matcher/src/main/kotlin/io/vladar107/application/booking/FindEventTypeSlotsQueryHandler.kt \
-        time-matcher/src/main/kotlin/io/vladar107/application/booking/BookSlotCommandHandler.kt \
-        time-matcher/src/test/kotlin/io/vladar107/application/booking/BookSlotCommandTest.kt
-git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" \
-  -m "feat: add per-event-type slot finder and book-slot command with double-booking guard"
-```
-
----
-
-### Task 8: Web layer + DI wiring (settings + event types) — restores a green full build
-
-DTOs and controllers for host config/event-types, plus all DI wiring (DB init, Exposed repos, CalendarWriter, new handlers; remove the deleted Phase-1 config bindings). This is the task that makes the whole app compile and boot again.
-
-**Files:**
-- Create: `web/booking/dto/EventTypeDto.kt`, `web/booking/EventTypeController.kt`
-- Modify: `web/availability/dto/AvailabilityConfigRequest.kt` (drop buffer fields; build a `Settings`), `web/availability/AvailabilityController.kt` (persist Settings via `SetSettingsCommand`)
-- Modify: `web/di/ConfigureRepositories.kt`, `ConfigureCommands.kt`, `ConfigureQueries.kt`, `ConfigureExternalServices.kt`, `web/di/ConfigureDi.kt` (DB init), `Application.kt` (register `configureEventTypes`)
-- Test: `time-matcher/src/test/kotlin/io/vladar107/web/booking/EventTypeRoutesTest.kt`
-
-**Interfaces:**
-- Consumes: all Task 2–7 handlers/ports/adapters; `Db` (Task 1); `CommandProvider`/`QueryProvider`.
-- Produces: `fun Application.configureEventTypes()`; `AvailabilityConfigRequest.toSettings(): Settings`.
-
-- [ ] **Step 1: Write the failing integration test**
-
-`EventTypeRoutesTest.kt`:
-```kotlin
-package io.vladar107.web.booking
-
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import io.ktor.server.testing.*
-import io.vladar107.module
-import kotlinx.serialization.json.Json
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
-
-class EventTypeRoutesTest {
-    private fun ApplicationTestBuilder.jsonClient() = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
-
-    @Test fun createsAndListsEventTypes() = testApplication {
-        application { module() }
-        val client = jsonClient()
-        val create = client.post("/event-types") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"slug":"intro","name":"Intro call","durationMinutes":30,"bufferBeforeMinutes":0,"bufferAfterMinutes":0}""")
-        }
-        assertEquals(HttpStatusCode.Created, create.status)
-        val list = client.get("/event-types")
-        assertEquals(HttpStatusCode.OK, list.status)
-        assertTrue(list.bodyAsText().contains("intro"))
-        assertEquals(HttpStatusCode.OK, client.get("/event-types/intro").status)
-        assertEquals(HttpStatusCode.NotFound, client.get("/event-types/missing").status)
-    }
-}
-```
-Note: tests must use an H2 DB. Drive the runtime DB URL from config so tests use a unique in-memory URL — see Step 4 (the app reads `db.url` from `application.yaml`, overridable per test via an env/system property, or the DI uses an in-memory URL when a test flag is set). Simplest: `application.yaml` sets `db.url: "jdbc:h2:mem:timematcher;DB_CLOSE_DELAY=-1"` for now (file mode is a follow-up once booking works), so tests and runtime share the in-memory config DB. Record this choice.
-
-- [ ] **Step 2: Run to verify it fails** — FAIL (routes/DTO/DI unresolved or red build from Task 5/6/7 deletions).
-
-- [ ] **Step 3: Update the config DTO + controller**
-
-Rewrite `AvailabilityConfigRequest.kt` to drop buffers and build a `Settings` (reuse the existing `LocalTimeRangeDto`/`DateOverrideDto`):
-```kotlin
-package io.vladar107.web.availability.dto
-
-import io.vladar107.domain.availability.DateOverride
-import io.vladar107.domain.availability.LocalTimeRange
-import io.vladar107.domain.availability.WeeklyAvailability
-import io.vladar107.domain.booking.Settings
-import kotlinx.serialization.Serializable
-import java.time.DayOfWeek
-import java.time.Duration
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
-
-@Serializable
-data class LocalTimeRangeDto(val start: String, val end: String)
-
-@Serializable
-data class DateOverrideDto(val date: String, val ranges: List<LocalTimeRangeDto>)
-
-@Serializable
-data class AvailabilityConfigRequest(
-    val zone: String,
-    val granularityMinutes: Long,
-    val minimumNoticeMinutes: Long = 0,
-    val weekly: Map<String, List<LocalTimeRangeDto>> = emptyMap(),
-    val overrides: List<DateOverrideDto> = emptyList(),
-) {
-    fun toSettings(): Settings {
-        require(granularityMinutes > 0) { "granularityMinutes must be positive" }
-        require(minimumNoticeMinutes >= 0) { "minimumNoticeMinutes must be non-negative" }
-        fun range(d: LocalTimeRangeDto) = LocalTimeRange(LocalTime.parse(d.start), LocalTime.parse(d.end))
-        return Settings(
-            zone = ZoneId.of(zone),
-            weekly = WeeklyAvailability(weekly.entries.associate { (day, r) -> DayOfWeek.valueOf(day.uppercase()) to r.map(::range) }),
-            overrides = overrides.map { DateOverride(LocalDate.parse(it.date), it.ranges.map(::range)) },
-            granularity = Duration.ofMinutes(granularityMinutes),
-            minimumNotice = Duration.ofMinutes(minimumNoticeMinutes),
-        )
-    }
-}
-```
-In `AvailabilityController.kt`, change the `PUT /availability/config` handler to `commandProvider.run(SetSettingsCommand(call.receive<AvailabilityConfigRequest>().toSettings()))` inside the existing try/catch→400, responding `204`. Update imports (drop `SetAvailabilityRulesCommand`, add `SetSettingsCommand` + `AvailabilityConfigRequest`). Leave `GET /availability/slots` and `POST /calendars/{id}/busy` as-is (the query result `AvailableSlots` is unchanged; mapping to `SlotDto` stays).
-
-- [ ] **Step 4: EventType DTO + controller + DB-aware DI**
-
-`EventTypeDto.kt`:
-```kotlin
-package io.vladar107.web.booking.dto
-
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class CreateEventTypeRequest(
-    val slug: String, val name: String,
-    val durationMinutes: Long, val bufferBeforeMinutes: Long = 0, val bufferAfterMinutes: Long = 0,
-)
-
-@Serializable
-data class EventTypeDto(
-    val id: String, val slug: String, val name: String,
-    val durationMinutes: Long, val bufferBeforeMinutes: Long, val bufferAfterMinutes: Long, val status: String,
-)
-```
-`EventTypeController.kt`:
-```kotlin
-package io.vladar107.web.booking
-
-import io.ktor.http.*
-import io.ktor.server.application.*
-import io.ktor.server.request.*
-import io.ktor.server.response.*
-import io.ktor.server.routing.*
-import io.vladar107.application.booking.CreateEventTypeCommand
-import io.vladar107.application.booking.GetEventTypeBySlugQuery
-import io.vladar107.application.booking.ListEventTypesQuery
-import io.vladar107.domain.booking.EventType
-import io.vladar107.infrastructure.CommandProvider
-import io.vladar107.infrastructure.QueryProvider
-import io.vladar107.web.booking.dto.CreateEventTypeRequest
-import io.vladar107.web.booking.dto.EventTypeDto
-import org.kodein.di.instance
-import org.kodein.di.ktor.closestDI
-import java.time.Duration
-
-private fun EventType.toDto() = EventTypeDto(
-    id.toString(), slug, name, duration.toMinutes(), bufferBefore.toMinutes(), bufferAfter.toMinutes(), status.name)
-
-fun Application.configureEventTypes() {
-    val commandProvider by closestDI { this@configureEventTypes }.instance<CommandProvider>()
-    val queryProvider by closestDI { this@configureEventTypes }.instance<QueryProvider>()
-    routing {
-        route("/event-types") {
-            post {
-                val cmd = try {
-                    val b = call.receive<CreateEventTypeRequest>()
-                    require(b.slug.isNotBlank() && b.name.isNotBlank()) { "slug and name required" }
-                    require(b.durationMinutes > 0) { "durationMinutes must be positive" }
-                    require(b.bufferBeforeMinutes >= 0 && b.bufferAfterMinutes >= 0) { "buffers must be non-negative" }
-                    CreateEventTypeCommand(b.slug, b.name, Duration.ofMinutes(b.durationMinutes),
-                        Duration.ofMinutes(b.bufferBeforeMinutes), Duration.ofMinutes(b.bufferAfterMinutes))
-                } catch (e: Exception) { return@post call.respond(HttpStatusCode.BadRequest, "Invalid event type: ${e.message}") }
-                commandProvider.run(cmd)
-                call.respond(HttpStatusCode.Created)
-            }
-            get {
-                val list: List<EventType> = queryProvider.query(ListEventTypesQuery())
-                call.respond(list.map { it.toDto() })
-            }
-            get("/{slug}") {
-                val slug = call.parameters["slug"]!!
-                val et: EventType? = queryProvider.query(GetEventTypeBySlugQuery(slug))
-                if (et == null) call.respond(HttpStatusCode.NotFound, "Unknown event type") else call.respond(et.toDto())
-            }
-        }
-    }
-}
-```
-DI changes:
-- `ConfigureExternalServices.kt`: add the DB init + bind a `Clock` (keep). Read the JDBC URL from config:
-```kotlin
-fun DI.MainBuilder.configureExternalServices(application: Application) {
-    val url = application.environment.config.propertyOrNull("db.url")?.getString() ?: "jdbc:h2:mem:timematcher;DB_CLOSE_DELAY=-1"
-    io.vladar107.data.persistence.Db.init(url)
-    bind<java.time.Clock>() with singleton { java.time.Clock.systemDefaultZone() }
-}
-```
-(Adjust `configureExternalServices()` call site in `ConfigureDi.kt` to pass `this@configureDi`.) Add `db: { url: "jdbc:h2:mem:timematcher;DB_CLOSE_DELAY=-1" }` to `application.yaml`. (File mode is a follow-up.)
-- `ConfigureRepositories.kt`: replace the deleted `AvailabilityConfigRepository` binding with the new repos (singletons):
-```kotlin
-    bind<InMemoryCalendarProvider>() with singleton { InMemoryCalendarProvider() }
-    bind<CalendarProvider>() with singleton { instance<InMemoryCalendarProvider>() }
-    bind<CalendarBusyWriter>() with singleton { instance<InMemoryCalendarProvider>() }
-    bind<CalendarWriter>() with singleton { instance<InMemoryCalendarProvider>() }
-    bind<SettingsRepository>() with singleton { ExposedSettingsRepository() }
-    bind<EventTypeRepository>() with singleton { ExposedEventTypeRepository() }
-    bind<ConnectedCalendarRepository>() with singleton { ExposedConnectedCalendarRepository() }
-    // keep the existing UserCreationRepository binding
-```
-- `ConfigureQueries.kt`: bind `QueryHandler<AvailableSlots, FindAvailableSlotsQuery>` (now needs `instance()` settingsRepo), `QueryHandler<List<EventType>, ListEventTypesQuery>`, `QueryHandler<EventType?, GetEventTypeBySlugQuery>`, `QueryHandler<AvailableSlots?, FindEventTypeSlotsQuery>`.
-- `ConfigureCommands.kt`: keep user command; add `CommandHandler<Unit, SetSettingsCommand>`, `CommandHandler<Unit, CreateEventTypeCommand>` (provider), and `CommandHandler<BookingResult, BookSlotCommand>` with **singleton** (holds the mutex):
-```kotlin
-    bind<CommandHandler<BookingResult, BookSlotCommand>>() with singleton {
-        BookSlotCommandHandler(instance(), instance(), instance(), instance(), instance(), instance())
-    }
-```
-- `Application.kt`: add `configureEventTypes()` (and `configureBooking()` from Task 9) to `module()`.
-
-- [ ] **Step 5: Run the build + the event-type test**
-
-Run: `… gradlew -p … build` → BUILD SUCCESSFUL; then `… --tests "io.vladar107.web.booking.EventTypeRoutesTest"` → PASS, and confirm the prior suites still pass.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add time-matcher/src/main/kotlin/io/vladar107/web time-matcher/src/main/kotlin/io/vladar107/Application.kt \
-        time-matcher/src/main/resources/application.yaml \
-        time-matcher/src/test/kotlin/io/vladar107/web/booking/EventTypeRoutesTest.kt
-git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" \
-  -m "feat: wire DB-backed config + event-type endpoints; restore green build"
-```
-
----
-
-### Task 9: Web layer — public booking endpoints + integration tests
-
-**Files:**
-- Create: `web/booking/dto/BookingDto.kt`, `web/booking/BookingController.kt`
-- Modify: `Application.kt` (register `configureBooking`), `web/di/ConfigureQueries.kt` (if not already bound in Task 8)
-- Test: `time-matcher/src/test/kotlin/io/vladar107/web/booking/BookingRoutesTest.kt`
-
-**Interfaces:**
-- Consumes: `FindEventTypeSlotsQuery`, `BookSlotCommand`, `BookingResult` (Task 7); `AvailableSlots`; `SlotDto` (existing).
-- Produces: `fun Application.configureBooking()`.
-
-- [ ] **Step 1: Write the failing integration test**
-
-`BookingRoutesTest.kt`:
-```kotlin
-package io.vladar107.web.booking
-
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import io.ktor.server.testing.*
-import io.vladar107.module
-import io.vladar107.web.availability.dto.SlotDto
-import kotlinx.serialization.json.Json
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
-
-class BookingRoutesTest {
-    private fun ApplicationTestBuilder.jsonClient() = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
-
-    @Test fun bookingRemovesTheSlotAndSecondBookingConflicts() = testApplication {
-        application { module() }
-        val client = jsonClient()
-        // configure UTC Mon 09-17
-        client.put("/availability/config") { contentType(ContentType.Application.Json)
-            setBody("""{"zone":"UTC","granularityMinutes":60,"weekly":{"MONDAY":[{"start":"09:00","end":"17:00"}]},"overrides":[]}""") }
-        client.post("/event-types") { contentType(ContentType.Application.Json)
-            setBody("""{"slug":"intro","name":"Intro","durationMinutes":60}""") }
-
-        val before = Json.decodeFromString<List<SlotDto>>(
-            client.get("/book/intro/slots") { parameter("from", "2030-01-07T00:00:00Z"); parameter("to", "2030-01-07T23:59:59Z") }.bodyAsText())
-        assertTrue(before.any { it.start == "2030-01-07T09:00:00Z" })
-
-        val booked = client.post("/book/intro") { contentType(ContentType.Application.Json)
-            setBody("""{"attendeeName":"Sam","attendeeEmail":"sam@example.com","start":"2030-01-07T09:00:00Z"}""") }
-        assertEquals(HttpStatusCode.Created, booked.status)
-
-        val after = Json.decodeFromString<List<SlotDto>>(
-            client.get("/book/intro/slots") { parameter("from", "2030-01-07T00:00:00Z"); parameter("to", "2030-01-07T23:59:59Z") }.bodyAsText())
-        assertTrue(after.none { it.start == "2030-01-07T09:00:00Z" })
-
-        val conflict = client.post("/book/intro") { contentType(ContentType.Application.Json)
-            setBody("""{"attendeeName":"Pat","attendeeEmail":"pat@example.com","start":"2030-01-07T09:00:00Z"}""") }
-        assertEquals(HttpStatusCode.Conflict, conflict.status)
-    }
-
-    @Test fun bookingUnknownEventTypeIs404() = testApplication {
-        application { module() }
-        val r = jsonClient().post("/book/nope") { contentType(ContentType.Application.Json)
-            setBody("""{"attendeeName":"X","attendeeEmail":"x@e.com","start":"2030-01-07T09:00:00Z"}""") }
-        assertEquals(HttpStatusCode.NotFound, r.status)
-    }
-}
-```
-Note: `module()` boots one app/DB per `testApplication`; the in-memory H2 (`DB_CLOSE_DELAY=-1`) persists for that app's lifetime. Because the DB is process-global in-memory, ensure event-type slugs differ across tests or the schema is fresh — if cross-test bleed appears, give each test a unique slug (e.g. include a per-test suffix) and assert accordingly.
-
-- [ ] **Step 2: Run to verify it fails** — FAIL (booking routes unresolved / 404).
-
-- [ ] **Step 3: Implement booking DTO + controller**
+- [ ] **Step 4: Booking DTO + controller + DI + register**
 
 `BookingDto.kt`:
 ```kotlin
@@ -1559,11 +1261,8 @@ package io.vladar107.web.booking.dto
 
 import kotlinx.serialization.Serializable
 
-@Serializable
-data class BookRequest(val attendeeName: String, val attendeeEmail: String, val start: String)
-
-@Serializable
-data class BookingConfirmation(val start: String, val end: String, val eventType: String)
+@Serializable data class BookRequest(val attendeeName: String, val attendeeEmail: String, val start: String)
+@Serializable data class BookingConfirmation(val start: String, val end: String, val eventType: String)
 ```
 `BookingController.kt`:
 ```kotlin
@@ -1600,11 +1299,9 @@ fun Application.configureBooking() {
         route("/book/{slug}") {
             get("/slots") {
                 val slug = call.parameters["slug"]!!
-                val from = call.request.queryParameters["from"]; val to = call.request.queryParameters["to"]
                 val query = try {
-                    val f = Instant.parse(from); val t = Instant.parse(to)
-                    require(f.isBefore(t)) { "from must be before to" }
-                    FindEventTypeSlotsQuery(slug, f, t)
+                    val f = Instant.parse(call.request.queryParameters["from"]); val t = Instant.parse(call.request.queryParameters["to"])
+                    require(f.isBefore(t)) { "from must be before to" }; FindEventTypeSlotsQuery(slug, f, t)
                 } catch (e: Exception) { return@get call.respond(HttpStatusCode.BadRequest, "Invalid query: ${e.message}") }
                 val result: AvailableSlots? = queryProvider.query(query)
                 if (result == null) return@get call.respond(HttpStatusCode.NotFound, "Unknown event type")
@@ -1627,34 +1324,84 @@ fun Application.configureBooking() {
     }
 }
 ```
-Register `configureBooking()` in `Application.module()` after `configureEventTypes()`.
+DI: `ConfigureQueries.kt` add `bind<QueryHandler<AvailableSlots?, FindEventTypeSlotsQuery>>() with provider { FindEventTypeSlotsQueryHandler(instance(), instance(), instance(), instance()) }`. `ConfigureCommands.kt` add (singleton — holds the mutex) `bind<CommandHandler<BookingResult, BookSlotCommand>>() with singleton { BookSlotCommandHandler(instance(), instance(), instance(), instance(), instance(), instance()) }`. `Application.kt` add `configureBooking()` to `module()`.
 
-- [ ] **Step 4: Run build + booking test, then commit**
+- [ ] **Step 5: Failing integration test, then green** — `BookingRoutesTest.kt`:
+```kotlin
+package io.vladar107.web.booking
 
-Run: `… gradlew -p … build` and `… --tests "io.vladar107.web.booking.BookingRoutesTest"` → PASS.
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.config.*
+import io.ktor.server.testing.*
+import io.vladar107.module
+import io.vladar107.web.availability.dto.SlotDto
+import kotlinx.serialization.json.Json
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class BookingRoutesTest {
+    private fun ApplicationTestBuilder.jsonClient() = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+
+    @Test fun bookingRemovesTheSlotAndSecondBookingConflicts() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to "jdbc:h2:mem:book-test;DB_CLOSE_DELAY=-1") }
+        application { module() }
+        val client = jsonClient()
+        client.put("/availability/config") { contentType(ContentType.Application.Json)
+            setBody("""{"zone":"UTC","granularityMinutes":60,"weekly":{"MONDAY":[{"start":"09:00","end":"17:00"}]},"overrides":[]}""") }
+        client.post("/event-types") { contentType(ContentType.Application.Json)
+            setBody("""{"slug":"intro","name":"Intro","durationMinutes":60}""") }
+        val before = Json.decodeFromString<List<SlotDto>>(
+            client.get("/book/intro/slots") { parameter("from", "2030-01-07T00:00:00Z"); parameter("to", "2030-01-07T23:59:59Z") }.bodyAsText())
+        assertTrue(before.any { it.start == "2030-01-07T09:00:00Z" })
+        assertEquals(HttpStatusCode.Created, client.post("/book/intro") { contentType(ContentType.Application.Json)
+            setBody("""{"attendeeName":"Sam","attendeeEmail":"sam@example.com","start":"2030-01-07T09:00:00Z"}""") }.status)
+        val after = Json.decodeFromString<List<SlotDto>>(
+            client.get("/book/intro/slots") { parameter("from", "2030-01-07T00:00:00Z"); parameter("to", "2030-01-07T23:59:59Z") }.bodyAsText())
+        assertTrue(after.none { it.start == "2030-01-07T09:00:00Z" })
+        assertEquals(HttpStatusCode.Conflict, client.post("/book/intro") { contentType(ContentType.Application.Json)
+            setBody("""{"attendeeName":"Pat","attendeeEmail":"pat@example.com","start":"2030-01-07T09:00:00Z"}""") }.status)
+    }
+
+    @Test fun bookingUnknownEventTypeIs404() = testApplication {
+        environment { config = MapApplicationConfig("db.url" to "jdbc:h2:mem:book404;DB_CLOSE_DELAY=-1") }
+        application { module() }
+        assertEquals(HttpStatusCode.NotFound, jsonClient().post("/book/nope") { contentType(ContentType.Application.Json)
+            setBody("""{"attendeeName":"X","attendeeEmail":"x@e.com","start":"2030-01-07T09:00:00Z"}""") }.status)
+    }
+}
+```
+- [ ] **Step 6: Full build (green) + commit**
+
+Run: `… gradlew -p … build` → BUILD SUCCESSFUL.
 ```bash
-git add time-matcher/src/main/kotlin/io/vladar107/web/booking time-matcher/src/main/kotlin/io/vladar107/Application.kt \
+git add time-matcher/src/main/kotlin/io/vladar107/application/booking \
+        time-matcher/src/main/kotlin/io/vladar107/web/booking time-matcher/src/main/kotlin/io/vladar107/web/di \
+        time-matcher/src/main/kotlin/io/vladar107/Application.kt \
+        time-matcher/src/test/kotlin/io/vladar107/application/booking/BookSlotCommandTest.kt \
         time-matcher/src/test/kotlin/io/vladar107/web/booking/BookingRoutesTest.kt
 git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vladar107@gmail.com>" \
-  -m "feat: public booking endpoints (per-type slots + book with 201/409/404)"
+  -m "feat: public booking endpoints + book command with double-booking guard"
 ```
 
 ---
 
-### Task 10: OpenAPI + ADR + diagram + final build
+### Task 8: OpenAPI + ADR + diagram + final build
 
 **Files:**
-- Modify: `time-matcher/src/main/resources/openapi/documentation.yaml` and `time-matcher/resources/openapi/documentation.yaml` (add event-type + booking endpoints)
+- Modify: `time-matcher/src/main/resources/openapi/documentation.yaml` and `time-matcher/resources/openapi/documentation.yaml`
 - Create: `documentation/adr/20260629-bookings-live-in-the-calendar.md`
-- Modify: `documentation/diagrams/Container.md` (Phase-2 note)
+- Modify: `documentation/diagrams/Container.md`
 
 - [ ] **Step 1: Document the new endpoints in both OpenAPI files**
 
-Add paths `POST /event-types`, `GET /event-types`, `GET /event-types/{slug}`, `GET /book/{slug}/slots`, `POST /book/{slug}` and schemas `CreateEventTypeRequest`, `EventTypeDto`, `BookRequest`, `BookingConfirmation`, mirroring the controllers' shapes (ISO-8601 strings; durations in minutes). Keep the existing availability/user paths. Update both files identically (as in Phase 1).
+Add paths `POST /event-types`, `GET /event-types`, `GET /event-types/{slug}`, `GET /book/{slug}/slots`, `POST /book/{slug}` and schemas `CreateEventTypeRequest`, `EventTypeDto`, `BookRequest`, `BookingConfirmation` (mirroring the controllers; ISO-8601 strings, durations in minutes). Keep the existing availability/user paths and the buffer-less config DTO (`AvailabilityConfigRequest` no longer has buffer fields). Update both files identically.
 
-- [ ] **Step 2: Write the ADR**
-
-`documentation/adr/20260629-bookings-live-in-the-calendar.md`:
+- [ ] **Step 2: ADR** — `documentation/adr/20260629-bookings-live-in-the-calendar.md`:
 ```markdown
 # Bookings live in the calendar; the DB holds only configuration
 
@@ -1664,27 +1411,25 @@ Add paths `POST /event-types`, `GET /event-types`, `GET /event-types/{slug}`, `G
 - Tags: architecture, booking, persistence
 
 ## Context and Problem Statement
-
 Phase 2 introduces booking. We must decide where bookings and configuration live.
 
 ## Decision Outcome
-
-The **calendar is the system of record for bookings** — a booking is an event written to a connected calendar (via the `CalendarWriter` port; the in-memory calendar adapter in slice 2a, real Google in 2b), and availability is pulled live from calendars. The **database (H2, via Exposed + Flyway) holds only configuration**: settings, event types, connected-calendar records. **Booking logic is in-memory/stateless**: compute open slots, validate under a lock, then write the event.
+The **calendar is the system of record for bookings** — a booking is an event written to a connected calendar (via the `CalendarWriter` port; in-memory adapter in slice 2a, real Google in 2b), and availability is pulled live from calendars. The **database (H2 file, via Exposed + Flyway) holds only configuration**: settings, event types, connected-calendar records. **Booking logic is in-memory/stateless**: compute open slots, validate under a Mutex, then write the event.
 
 Consequences:
 - The Phase-1 `AvailabilityEngine` is unchanged; its `AvailabilityRules` is assembled from host-global `Settings` + a per-`EventType` duration/buffers.
 - Double-booking is prevented by serializing validate-then-write with a Mutex (sufficient for a single-process, single-host slice).
 - Roles: one host manages settings/event types; anyone with an event type's `slug` (the link) can book. Host authentication is deferred to slice 2c.
-- Slice 2a uses an in-memory H2 config DB; switching to H2 file mode (durable config) is a small follow-up via `db.url`.
+- Config persists in an H2 file (`db.url`); tests override it to a unique in-memory DB. `Db.init` connects Exposed globally, so tests run with `maxParallelForks = 1`.
 ```
 
 - [ ] **Step 3: Diagram note + final build + commit**
 
-Add to `documentation/diagrams/Container.md` (under the Phase-1 note):
+Add under the Phase-1 note in `documentation/diagrams/Container.md`:
 ```markdown
 > Phase 2a (implemented): EventTypes + booking. Config (settings, event types, connected calendars) in H2; bookings written to the calendar via the CalendarWriter port. Real Google calendar + host auth are later slices.
 ```
-Run: `… gradlew -p … build` → BUILD SUCCESSFUL (all suites green).
+Run: `… gradlew -p … build` → BUILD SUCCESSFUL (all suites).
 ```bash
 git add time-matcher/src/main/resources/openapi/documentation.yaml time-matcher/resources/openapi/documentation.yaml \
         documentation/adr/20260629-bookings-live-in-the-calendar.md documentation/diagrams/Container.md
@@ -1696,20 +1441,12 @@ git -c user.email=vladar107@gmail.com commit --author="Vladislav Ramazaev <vlada
 
 ## Self-Review
 
-**Spec coverage:**
-- Config/settings split (buffers→EventType) → Task 2 (`effectiveRules`), Task 5 (finder), Task 8 (config DTO).
-- H2 schema (settings/working_hours/date_override/event_type/connected_calendar, seeded) → Task 1.
-- Persistence stack (H2 file + Flyway + Exposed) + version de-risk → Task 1. (Runtime URL is in-memory in 2a; file mode noted as a follow-up — a deliberate, logged scope cut.)
-- `CalendarWriter` + in-memory calendar stores events (booking → busy) → Task 3.
-- DB-backed repos → Task 4. EventType use cases → Task 6. Settings use case + finder rewire → Task 5.
-- Booking flow (GET per-type slots, POST book, 201/409/404, double-booking guard) → Tasks 7, 9.
-- Host vs public routes; auth deferred to 2c → Tasks 8, 9 (+ ADR). EventTypes create/list/get only → Task 6/8.
-- Engine unchanged → confirmed (Task 2 assembles its input; no engine edits anywhere).
-- Tests integration-weighted + focused units → Tasks 4,8,9 (integration), 2,6,7 (units).
-- Docs (OpenAPI, ADR, diagram) → Task 10.
+**Spec coverage:** config/settings split → T2/T5; H2 schema + stack + version de-risk → T1; `CalendarWriter` + booking-shows-busy → T3; DB repos → T4; settings command + finder rewire + DB wiring (file mode) → T5; EventType use cases + host endpoints → T6; per-type slots + book + double-booking guard + public endpoints → T7; host vs public routes, auth deferred to 2c, EventTypes create/list/get only → T5–T7 + ADR; engine unchanged → confirmed; integration-weighted tests + focused units → T1/T4/T5/T6/T7 (integration), T2/T3/T7 (units); docs → T8.
 
-**Placeholder scan:** No TBD/TODO; each code step has complete code. Two explicit, logged scope decisions (in-memory H2 URL in 2a → file mode follow-up; single range per override row) — not placeholders.
+**Build-green invariant:** every task ends with a full `./gradlew build`. The only deletions (T5) update all references (DI + controller) in the same task. T6/T7 add handlers and bind+expose them within the same task. No "build red" interval.
 
-**Type consistency:** `Settings(zone, weekly, overrides, granularity, minimumNotice)` consistent across Tasks 2/4/5/8. `EventType(id, slug, name, duration, bufferBefore, bufferAfter, status)` consistent across 2/4/6/7. `effectiveRules(settings)` 2→7. `CalendarWriter.createEvent(calendarId, CalendarEvent)` 3→7. `AvailableSlots(zone, slots)` (Phase-1) reused 5/7/9. `BookingResult` (Booked/SlotTaken/EventTypeNotFound) 7→9. Repository port signatures identical across ports (2), adapters (4), and consumers (5/6/7).
+**Placeholder scan:** complete code throughout; no TBD/TODO. Logged scope cut: one range per `date_override` row.
 
-**Known cross-version risk (flagged, not a gap):** Exposed 1.0 module/package/query-DSL names and the Flyway H2 module are resolved empirically in Task 1; later tasks' Exposed imports/query spellings follow whatever Task 1 pins.
+**Type consistency:** `Settings(zone, weekly, overrides, granularity, minimumNotice)`, `EventType(id, slug, name, duration, bufferBefore, bufferAfter, status)`, `effectiveRules(settings)`, `CalendarWriter.createEvent(calendarId, CalendarEvent)`, `AvailableSlots(zone, slots)`, `BookingResult` variants, and all repository port signatures are consistent across the tasks that define, adapt, and consume them. DI binding generic types match the handlers' `QueryHandler`/`CommandHandler` parameterizations.
+
+**Cross-version risk (flagged):** Exposed 1.0 module/package/query-DSL names + Flyway H2 module are resolved empirically in T1; later tasks' Exposed imports follow T1's pinned set.
