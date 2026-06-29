@@ -9,9 +9,10 @@ import kotlin.test.assertEquals
 
 class ApplicationTest {
     @Test
-    fun userRouteResponds() = testApplication {
+    fun applicationModuleBootsAndServesMetrics() = testApplication {
         application { module() }
-        val response = client.get("/user")
+        // Smoke test: the module wires up (DI, monitoring, routing) and serves a stable route.
+        val response = client.get("/metrics-micrometer")
         assertEquals(HttpStatusCode.OK, response.status)
     }
 }

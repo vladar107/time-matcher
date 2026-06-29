@@ -17,9 +17,6 @@ fun Application.configureUser() {
         route("/user") {
             val commandProvider by closestDI { this@configureUser }.instance<CommandProvider>()
 
-            get {
-                call.respond("User")
-            }
             get<User> {
                 call.respond("User")
             }
