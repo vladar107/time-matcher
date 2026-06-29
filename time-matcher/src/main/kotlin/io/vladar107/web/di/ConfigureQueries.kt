@@ -3,6 +3,8 @@ package io.vladar107.web.di
 import io.vladar107.application.availability.AvailableSlots
 import io.vladar107.application.availability.FindAvailableSlotsQuery
 import io.vladar107.application.availability.FindAvailableSlotsQueryHandler
+import io.vladar107.application.booking.FindEventTypeSlotsQuery
+import io.vladar107.application.booking.FindEventTypeSlotsQueryHandler
 import io.vladar107.application.booking.GetEventTypeBySlugQuery
 import io.vladar107.application.booking.GetEventTypeBySlugQueryHandler
 import io.vladar107.application.booking.ListEventTypesQuery
@@ -23,5 +25,8 @@ fun DI.MainBuilder.configureQueries() {
     }
     bind<QueryHandler<EventType?, GetEventTypeBySlugQuery>>() with provider {
         GetEventTypeBySlugQueryHandler(instance())
+    }
+    bind<QueryHandler<AvailableSlots?, FindEventTypeSlotsQuery>>() with provider {
+        FindEventTypeSlotsQueryHandler(instance(), instance(), instance(), instance())
     }
 }
