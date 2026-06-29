@@ -100,4 +100,27 @@ class AvailabilityEngineTest {
         val slots = engine.findSlots(dstRules, emptyList(), search, longAgo)
         assertEquals(5, slots.size)
     }
+
+    @Test
+    fun buffersPadBusyBlocksAndMergeAdjacent() {
+        // busy 10:00-11:00 with 15-min buffers blocks 09:45-11:15.
+        val buffered = rules().copy(bufferBefore = Duration.ofMinutes(15), bufferAfter = Duration.ofMinutes(15))
+        val busy = listOf(BusyInterval(TimeInterval(t("2030-01-07T10:00:00Z"), t("2030-01-07T11:00:00Z")), "work"))
+        val slots = engine.findSlots(buffered, busy, mondaySearch(60), longAgo)
+        // No slot may overlap the buffered block 09:45-11:15.
+        val blocked = TimeInterval(t("2030-01-07T09:45:00Z"), t("2030-01-07T11:15:00Z"))
+        assertTrue(slots.none { it.overlaps(blocked) })
+        // First slot after the block is 11:30 (grid-aligned).
+        assertTrue(slots.any { it.start == t("2030-01-07T11:30:00Z") })
+    }
+
+    @Test
+    fun minimumNoticeClipsTheWindowStart() {
+        // "now" is 2030-01-07T09:10Z with 2h notice -> earliest slot start >= 11:10 -> grid -> 11:30.
+        val noticed = rules().copy(minimumNotice = Duration.ofHours(2))
+        val now = t("2030-01-07T09:10:00Z")
+        val slots = engine.findSlots(noticed, emptyList(), mondaySearch(60), now)
+        assertTrue(slots.all { !it.start.isBefore(t("2030-01-07T11:10:00Z")) })
+        assertEquals(t("2030-01-07T11:30:00Z"), slots.first().start)
+    }
 }
