@@ -25,7 +25,7 @@ cd time-matcher
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
 ```
 
-Toolchain: JDK 25 (LTS), Kotlin 2.4.0, Ktor 2.3.9 server runtime (Netty engine) with the Ktor Gradle plugin `io.ktor.plugin` 3.5.1, Gradle 9.5.0 (via wrapper), Kodein DI 7.21.0. Dependency versions are pinned in `time-matcher/gradle.properties` and `build.gradle.kts`. See `documentation/adr/20260629-modernize-build-toolchain-for-jdk-25.md` for why the Ktor runtime stays on 2.3.9 while the plugin is on 3.x.
+Toolchain: JDK 25 (LTS), Kotlin 2.4.0, Ktor 3.5.1 (Netty engine; plugin `io.ktor.plugin` 3.5.1 + server runtime, aligned by `ktor-bom`), Gradle 9.5.0 (via wrapper), Kodein DI 7.32.0. Versions are in `time-matcher/gradle.properties` and `build.gradle.kts`. **Add new `io.ktor:*` dependencies *without* a version** — `ktor-bom` aligns them; pinning one causes mismatches. The Ktor test host is `io.ktor:ktor-server-test-host-jvm`. See `documentation/adr/20260629-modernize-build-toolchain-for-jdk-25.md`.
 
 Runtime endpoints: `/user` (GET/POST), `/metrics-micrometer` (Prometheus), `/openapi` (Swagger UI). Server config is in `src/main/resources/application.yaml`.
 
