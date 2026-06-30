@@ -40,6 +40,14 @@ class ConnectedCalendarRepositoryTest {
         assertTrue(repo.googleCalendars().isEmpty())
     }
 
+    @Test fun setBookingTargetWithUnknownIdLeavesCurrentTargetIntact() = runBlocking {
+        val a = google("a@x.com"); val b = google("b@x.com"); repo.add(a); repo.add(b)
+        repo.setBookingTarget(a.id)
+        assertEquals("a@x.com", repo.bookingTarget()?.accountEmail)
+        repo.setBookingTarget(java.util.UUID.randomUUID()) // unknown id — must be a no-op
+        assertEquals("a@x.com", repo.bookingTarget()?.accountEmail)
+    }
+
     @Test fun googleCalendarsExcludesSeededInMemoryRow() = runBlocking {
         assertEquals("IN_MEMORY", repo.default().provider) // seed still present
         assertTrue(repo.googleCalendars().isEmpty())

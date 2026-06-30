@@ -4,6 +4,7 @@ import io.vladar107.application.booking.ConnectedCalendarRepository
 import io.vladar107.data.persistence.ConnectedCalendarTable
 import io.vladar107.domain.booking.ConnectedCalendar
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
@@ -57,6 +58,10 @@ class ExposedConnectedCalendarRepository : ConnectedCalendarRepository {
     } }
 
     override suspend fun setBookingTarget(id: java.util.UUID) { transaction {
+        val isGoogleRow = ConnectedCalendarTable.selectAll()
+            .where { (ConnectedCalendarTable.id eq id.toKotlinUuid()) and (ConnectedCalendarTable.provider eq "GOOGLE") }
+            .count() > 0
+        if (!isGoogleRow) return@transaction
         ConnectedCalendarTable.update({ ConnectedCalendarTable.provider eq "GOOGLE" }) { it[isBookingTarget] = false }
         ConnectedCalendarTable.update({ ConnectedCalendarTable.id eq id.toKotlinUuid() }) { it[isBookingTarget] = true }
     } }
@@ -69,6 +74,7 @@ class ExposedConnectedCalendarRepository : ConnectedCalendarRepository {
         if (wasTarget) {
             val next = ConnectedCalendarTable.selectAll()
                 .where { ConnectedCalendarTable.provider eq "GOOGLE" }
+                .orderBy(ConnectedCalendarTable.createdAt, SortOrder.ASC)
                 .firstOrNull()
             if (next != null) {
                 ConnectedCalendarTable.update({ ConnectedCalendarTable.id eq next[ConnectedCalendarTable.id] }) { it[isBookingTarget] = true }
