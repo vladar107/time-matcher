@@ -41,7 +41,11 @@ class GoogleCalendarApiTest {
     @Test fun insertEventSendsAttendeeAndSucceeds() = runBlocking {
         var captured = ""
         val api = GoogleCalendarApi(tokenSource(),
-            HttpClient(MockEngine { req -> captured = (req.body as io.ktor.http.content.TextContent).text; respond("""{"id":"evt1"}""", HttpStatusCode.OK, jsonHeaders) }) { install(ContentNegotiation) { json() } })
+            HttpClient(MockEngine { req ->
+                assertTrue(req.url.toString().contains("sendUpdates=all"))
+                captured = (req.body as io.ktor.http.content.TextContent).text
+                respond("""{"id":"evt1"}""", HttpStatusCode.OK, jsonHeaders)
+            }) { install(ContentNegotiation) { json() } })
         api.insertEvent("primary", CalendarEvent(TimeInterval(t("2030-01-07T09:00:00Z"), t("2030-01-07T10:00:00Z")), "Intro with Sam", "Sam", "sam@example.com"))
         assertTrue(captured.contains("sam@example.com"))
         assertTrue(captured.contains("Intro with Sam"))
@@ -50,6 +54,13 @@ class GoogleCalendarApiTest {
     @Test fun nonSuccessThrowsCalendarException() = runBlocking<Unit> {
         val api = GoogleCalendarApi(tokenSource(),
             HttpClient(MockEngine { respond("""{"error":{"code":500}}""", HttpStatusCode.InternalServerError, jsonHeaders) }) { install(ContentNegotiation) { json() } })
+        assertFailsWith<CalendarException> { api.freeBusy("primary", TimeInterval(t("2030-01-07T00:00:00Z"), t("2030-01-07T23:59:59Z"))) }
+    }
+
+    @Test fun freeBusyPerCalendarErrorThrowsCalendarException() = runBlocking<Unit> {
+        val body = """{"calendars":{"primary":{"errors":[{"domain":"calendar","reason":"notFound"}]}}}"""
+        val api = GoogleCalendarApi(tokenSource(),
+            HttpClient(MockEngine { respond(body, HttpStatusCode.OK, jsonHeaders) }) { install(ContentNegotiation) { json() } })
         assertFailsWith<CalendarException> { api.freeBusy("primary", TimeInterval(t("2030-01-07T00:00:00Z"), t("2030-01-07T23:59:59Z"))) }
     }
 }

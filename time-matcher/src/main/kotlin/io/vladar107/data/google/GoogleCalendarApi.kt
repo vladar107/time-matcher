@@ -20,7 +20,8 @@ import java.time.Instant
 @Serializable private data class FbItem(val id: String)
 @Serializable private data class FreeBusyRequest(val timeMin: String, val timeMax: String, val items: List<FbItem>)
 @Serializable private data class FbSlot(val start: String, val end: String)
-@Serializable private data class FbCalendar(val busy: List<FbSlot> = emptyList())
+@Serializable private data class FbError(val domain: String? = null, val reason: String? = null)
+@Serializable private data class FbCalendar(val busy: List<FbSlot> = emptyList(), val errors: List<FbError> = emptyList())
 @Serializable private data class FreeBusyResponse(val calendars: Map<String, FbCalendar> = emptyMap())
 @Serializable private data class EventTime(val dateTime: String)
 @Serializable private data class EventAttendee(val email: String, val displayName: String? = null)
@@ -39,8 +40,13 @@ class GoogleCalendarApi(
             }
         }
         val parsed = resp.body<FreeBusyResponse>()
-        return parsed.calendars[calendarId]?.busy.orEmpty()
-            .map { TimeInterval(Instant.parse(it.start), Instant.parse(it.end)) }
+        val cal = parsed.calendars[calendarId]
+            ?: throw CalendarException("freeBusy error for calendar $calendarId: missing")
+        if (cal.errors.isNotEmpty()) {
+            val reasons = cal.errors.joinToString { it.reason ?: it.domain ?: "unknown" }
+            throw CalendarException("freeBusy error for calendar $calendarId: $reasons")
+        }
+        return cal.busy.map { TimeInterval(Instant.parse(it.start), Instant.parse(it.end)) }
     }
 
     suspend fun insertEvent(calendarId: String, event: CalendarEvent) {
