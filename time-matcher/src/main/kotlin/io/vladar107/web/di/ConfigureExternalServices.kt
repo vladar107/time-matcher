@@ -11,10 +11,12 @@ import io.vladar107.application.availability.CalendarWriter
 import io.vladar107.data.google.GoogleCalendarApi
 import io.vladar107.data.google.GoogleCalendarProvider
 import io.vladar107.data.google.GoogleCalendarWriter
+import io.vladar107.data.google.GoogleOAuthApi
 import io.vladar107.data.google.GoogleTokenManager
 import io.vladar107.data.persistence.Db
 import io.vladar107.data.repositories.InMemoryCalendarProvider
 import io.vladar107.data.repositories.NoOpCalendarBusyWriter
+import io.vladar107.web.oauth.ConnectStateStore
 import org.kodein.di.DI
 import org.kodein.di.bind
 import org.kodein.di.instance
@@ -33,8 +35,11 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
         fun req(k: String) = cfg.propertyOrNull(k)?.getString()?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Missing config: $k")
         val httpClient = HttpClient(CIO) { install(ContentNegotiation) { json() } }
+        val redirectBase = cfg.propertyOrNull("oauth.redirectBaseUrl")?.getString() ?: "http://localhost:8080"
         bind<GoogleTokenManager>() with singleton { GoogleTokenManager(req("google.clientId"), req("google.clientSecret"), httpClient, instance()) }
         bind<GoogleCalendarApi>() with singleton { GoogleCalendarApi(httpClient) }
+        bind<GoogleOAuthApi>() with singleton { GoogleOAuthApi(req("google.clientId"), req("google.clientSecret"), "$redirectBase/oauth/google/callback", httpClient) }
+        bind<ConnectStateStore>() with singleton { ConnectStateStore(instance()) }
         bind<CalendarProvider>() with singleton { GoogleCalendarProvider(instance(), instance(), instance()) }
         bind<CalendarWriter>() with singleton { GoogleCalendarWriter(instance(), instance(), instance()) }
         bind<CalendarBusyWriter>() with singleton { NoOpCalendarBusyWriter() }
