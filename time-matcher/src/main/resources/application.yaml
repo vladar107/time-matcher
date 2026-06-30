@@ -9,10 +9,10 @@ db:
     url: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
 
 calendar:
-    provider: "inmemory"   # or "google"
+    provider: "$CALENDAR_PROVIDER:inmemory"   # set CALENDAR_PROVIDER=google to enable
 
 google:
-    clientId: ""
-    clientSecret: ""
-    refreshToken: ""
-    calendarId: "primary"
+    clientId: "$GOOGLE_CLIENT_ID:"
+    clientSecret: "$GOOGLE_CLIENT_SECRET:"
+    refreshToken: "$GOOGLE_REFRESH_TOKEN:"
+    calendarId: "$GOOGLE_CALENDAR_ID:primary"
