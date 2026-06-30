@@ -11,7 +11,7 @@ import io.vladar107.application.availability.CalendarWriter
 import io.vladar107.data.google.GoogleCalendarApi
 import io.vladar107.data.google.GoogleCalendarProvider
 import io.vladar107.data.google.GoogleCalendarWriter
-import io.vladar107.data.google.GoogleTokenSource
+import io.vladar107.data.google.GoogleTokenManager
 import io.vladar107.data.persistence.Db
 import io.vladar107.data.repositories.InMemoryCalendarProvider
 import io.vladar107.data.repositories.NoOpCalendarBusyWriter
@@ -32,15 +32,11 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
         val cfg = application.environment.config
         fun req(k: String) = cfg.propertyOrNull(k)?.getString()?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Missing config: $k")
-        val httpClient = HttpClient(CIO) {
-            install(ContentNegotiation) { json() }
-        }
-        val tokenSource = GoogleTokenSource(
-            req("google.clientId"), req("google.clientSecret"), req("google.refreshToken"), httpClient, java.time.Clock.systemUTC())
-        val api = GoogleCalendarApi(tokenSource, httpClient)
-        val calendarId = cfg.propertyOrNull("google.calendarId")?.getString()?.takeIf { it.isNotBlank() } ?: "primary"
-        bind<CalendarProvider>() with singleton { GoogleCalendarProvider(api, calendarId) }
-        bind<CalendarWriter>() with singleton { GoogleCalendarWriter(api, calendarId) }
+        val httpClient = HttpClient(CIO) { install(ContentNegotiation) { json() } }
+        bind<GoogleTokenManager>() with singleton { GoogleTokenManager(req("google.clientId"), req("google.clientSecret"), httpClient, instance()) }
+        bind<GoogleCalendarApi>() with singleton { GoogleCalendarApi(httpClient) }
+        bind<CalendarProvider>() with singleton { GoogleCalendarProvider(instance(), instance(), instance()) }
+        bind<CalendarWriter>() with singleton { GoogleCalendarWriter(instance(), instance(), instance()) }
         bind<CalendarBusyWriter>() with singleton { NoOpCalendarBusyWriter() }
     } else {
         bind<InMemoryCalendarProvider>() with singleton { InMemoryCalendarProvider() }
