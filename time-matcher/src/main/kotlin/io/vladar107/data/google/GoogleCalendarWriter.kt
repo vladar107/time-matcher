@@ -1,5 +1,6 @@
 package io.vladar107.data.google
 
+import io.vladar107.application.availability.CalendarException
 import io.vladar107.application.availability.CalendarWriter
 import io.vladar107.application.availability.NoBookingCalendarException
 import io.vladar107.application.booking.ConnectedCalendarRepository
@@ -13,6 +14,8 @@ class GoogleCalendarWriter(
 ) : CalendarWriter {
     override suspend fun createEvent(calendarId: String, event: CalendarEvent) {
         val target = repo.bookingTarget() ?: throw NoBookingCalendarException()
-        api.insertEvent(tokens.accessToken(target.refreshToken!!), target.externalCalendarId!!, event)
+        val rt = target.refreshToken ?: throw CalendarException("Connected calendar ${target.id} is missing a refresh token")
+        val calId = target.externalCalendarId ?: throw CalendarException("Connected calendar ${target.id} is missing a calendar id")
+        api.insertEvent(tokens.accessToken(rt), calId, event)
     }
 }

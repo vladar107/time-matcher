@@ -57,13 +57,20 @@ class GoogleCalendarMultiTest {
     }
 
     @Test fun bookingWritesToTheTargetCalendar() = runBlocking {
-        val repo = FakeRepo(listOf(g("a@x.com"), g("b@x.com", target = true)))
-        var captured = ""
-        val api = GoogleCalendarApi(client { req -> captured = (req.body as io.ktor.http.content.TextContent).text
-            respond("""{"id":"evt1"}""", HttpStatusCode.OK, jsonHeaders) })
+        val nonTarget = ConnectedCalendar(UUID.randomUUID(), "a@x.com", "GOOGLE", "a@x.com", "cal-a", "rt-a", false)
+        val target    = ConnectedCalendar(UUID.randomUUID(), "b@x.com", "GOOGLE", "b@x.com", "cal-b", "rt-b", true)
+        val repo = FakeRepo(listOf(nonTarget, target))
+        var capturedUrl = ""
+        var capturedBody = ""
+        val api = GoogleCalendarApi(client { req ->
+            capturedUrl = req.url.toString()
+            capturedBody = (req.body as io.ktor.http.content.TextContent).text
+            respond("""{"id":"evt1"}""", HttpStatusCode.OK, jsonHeaders)
+        })
         GoogleCalendarWriter(repo, tokens(), api).createEvent("ignored",
             CalendarEvent(TimeInterval(t("2030-01-07T09:00:00Z"), t("2030-01-07T10:00:00Z")), "Intro with Sam", "Sam", "sam@example.com"))
-        assertTrue(captured.contains("Intro with Sam"))
+        assertTrue(capturedUrl.contains("cal-b"), "expected URL to contain cal-b but was: $capturedUrl")
+        assertTrue(capturedBody.contains("Intro with Sam"))
     }
 
     @Test fun bookingWithNoTargetThrows() = runBlocking<Unit> {

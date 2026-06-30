@@ -1,5 +1,6 @@
 package io.vladar107.data.google
 
+import io.vladar107.application.availability.CalendarException
 import io.vladar107.application.availability.CalendarProvider
 import io.vladar107.application.booking.ConnectedCalendarRepository
 import io.vladar107.domain.availability.BusyInterval
@@ -13,7 +14,9 @@ class GoogleCalendarProvider(
 ) : CalendarProvider {
     override suspend fun busyIntervals(window: TimeInterval): List<BusyInterval> =
         repo.googleCalendars().flatMap { cal ->
-            val token = tokens.accessToken(cal.refreshToken!!)
-            api.freeBusy(token, cal.externalCalendarId!!, window).map { BusyInterval(it, cal.id.toString()) }
+            val rt = cal.refreshToken ?: throw CalendarException("Connected calendar ${cal.id} is missing a refresh token")
+            val calId = cal.externalCalendarId ?: throw CalendarException("Connected calendar ${cal.id} is missing a calendar id")
+            val token = tokens.accessToken(rt)
+            api.freeBusy(token, calId, window).map { BusyInterval(it, cal.id.toString()) }
         }
 }
