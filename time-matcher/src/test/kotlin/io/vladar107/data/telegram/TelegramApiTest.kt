@@ -11,6 +11,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TelegramApiTest {
@@ -40,5 +41,7 @@ class TelegramApiTest {
         assertTrue(captured.contains("inline_keyboard"))
         assertTrue(captured.contains("callback_data") && captured.contains("target:1"))
         assertTrue(captured.contains("\"url\":\"https://h/x\""))
+        assertFalse(captured.contains("\"callback_data\":null"))
+        assertFalse(captured.contains("\"url\":null"))
     }
 }

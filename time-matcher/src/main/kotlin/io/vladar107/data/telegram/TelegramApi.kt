@@ -100,6 +100,7 @@ private val telegramJson = Json {
  */
 class TelegramApi(botToken: String, private val httpClient: HttpClient) {
 
+    private val logger = org.slf4j.LoggerFactory.getLogger(TelegramApi::class.java)
     private val base = "https://api.telegram.org/bot$botToken"
 
     /**
@@ -129,7 +130,7 @@ class TelegramApi(botToken: String, private val httpClient: HttpClient) {
             return  // swallow network errors for send
         }
         if (!resp.status.isSuccess()) {
-            // log and swallow — bot UX
+            logger.warn("Telegram sendMessage failed: {}", resp.status)
         }
     }
 
@@ -141,10 +142,11 @@ class TelegramApi(botToken: String, private val httpClient: HttpClient) {
         val req = AnswerCallbackRequest(callbackId)
         val body = telegramJson.encodeToString(AnswerCallbackRequest.serializer(), req)
         try {
-            httpClient.post("$base/answerCallbackQuery") {
+            val resp = httpClient.post("$base/answerCallbackQuery") {
                 contentType(ContentType.Application.Json)
                 setBody(body)
             }
+            if (!resp.status.isSuccess()) logger.warn("Telegram answerCallbackQuery failed: {}", resp.status)
         } catch (e: Exception) {
             // swallow
         }
