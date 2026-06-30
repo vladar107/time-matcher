@@ -14,5 +14,10 @@ calendar:
 google:
     clientId: "$GOOGLE_CLIENT_ID:"
     clientSecret: "$GOOGLE_CLIENT_SECRET:"
-    refreshToken: "$GOOGLE_REFRESH_TOKEN:"
-    calendarId: "$GOOGLE_CALENDAR_ID:primary"
+
+oauth:
+    redirectBaseUrl: "$OAUTH_REDIRECT_BASE_URL:http://localhost:8080"
+
+telegram:
+    botToken: "$TELEGRAM_BOT_TOKEN:"
+    hostUserId: "$TELEGRAM_HOST_USER_ID:0"

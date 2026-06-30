@@ -6,6 +6,8 @@ C4 Container Diagram
 
 > Phase 2c (implemented): public booking page at `GET /book/{slug}` — a self-contained HTML/JS page (attendee timezone; 1-day mobile / 7-day desktop) driving the booking JSON API. (Host admin Telegram bot and deployment are separate, later.)
 
+> Phase 2d (implemented): host-only Telegram bot (long-polling) is the management surface — connect/list/remove Google Calendars and pick the booking target. Connecting uses a browser OAuth hop (`/oauth/google/start` → Google consent → `/oauth/google/callback`). Availability unions busy across all connected calendars; bookings write to the ★ target. (Event-type & schedule management via the bot, and deployment, are later.)
+
 ```mermaid
 C4Container
 title C4 Container Diagram
