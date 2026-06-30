@@ -16,6 +16,7 @@ import io.vladar107.data.google.GoogleTokenManager
 import io.vladar107.data.persistence.Db
 import io.vladar107.data.repositories.InMemoryCalendarProvider
 import io.vladar107.data.repositories.NoOpCalendarBusyWriter
+import io.vladar107.data.telegram.TelegramApi
 import io.vladar107.web.oauth.ConnectStateStore
 import org.kodein.di.DI
 import org.kodein.di.bind
@@ -28,6 +29,11 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
         ?: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
     Db.init(url)
     bind<Clock>() with singleton { Clock.systemDefaultZone() }
+
+    // Bind TelegramApi unconditionally so both google and in-memory modes can resolve it.
+    // The poll loop (configureTelegramBot) only starts when a real token is configured.
+    val telegramToken = application.environment.config.propertyOrNull("telegram.botToken")?.getString() ?: ""
+    bind<TelegramApi>() with singleton { TelegramApi(telegramToken, HttpClient(CIO) { install(ContentNegotiation) { json() } }) }
 
     val provider = application.environment.config.propertyOrNull("calendar.provider")?.getString() ?: "inmemory"
     if (provider == "google") {
