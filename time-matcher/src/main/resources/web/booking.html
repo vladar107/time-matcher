@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Book a meeting</title>
+<style>
+  :root { --fg:#1a1a2e; --muted:#6b7280; --accent:#2563eb; --bg:#f7f7fb; --card:#fff; --border:#e5e7eb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, sans-serif; color:var(--fg); background:var(--bg); }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-top:16px; }
+  .nav { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+  button { font:inherit; cursor:pointer; border-radius:8px; border:1px solid var(--border); background:#fff; padding:8px 12px; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .days { display:grid; gap:12px; grid-template-columns: 1fr; }
+  .days.week { grid-template-columns: repeat(7, 1fr); }
+  .day h3 { font-size:.85rem; margin:0 0 8px; }
+  .slots { display:flex; flex-direction:column; gap:6px; }
+  .slot { text-align:center; }
+  .slot.selected { background:var(--accent); color:#fff; border-color:var(--accent); }
+  form { display:flex; flex-direction:column; gap:10px; max-width:360px; }
+  input { font:inherit; padding:8px; border:1px solid var(--border); border-radius:8px; }
+  .hidden { display:none; }
+  .error { color:#b91c1c; } .ok { color:#047857; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="header"><h1 id="title">Loading…</h1><div class="muted" id="subtitle"></div></div>
+  <div id="notfound" class="card hidden"><strong>Event type not found.</strong> Check the link.</div>
+  <div id="picker" class="card hidden">
+    <div class="nav"><button id="prev">‹ Prev</button><div class="muted" id="rangeLabel"></div><button id="next">Next ›</button></div>
+    <div class="muted" id="tzLabel"></div>
+    <div id="days" class="days"></div>
+    <div id="slotsMsg" class="muted"></div>
+  </div>
+  <div id="formCard" class="card hidden">
+    <div id="chosen" class="muted"></div>
+    <form id="bookForm">
+      <input id="name" placeholder="Your name" required>
+      <input id="email" type="email" placeholder="Your email" required>
+      <button class="primary" type="submit" id="submitBtn">Confirm booking</button>
+      <div id="formMsg"></div>
+    </form>
+  </div>
+  <div id="done" class="card hidden"></div>
+</div>
+<script>
+const slug = location.pathname.split('/').filter(Boolean).pop();
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const el = id => document.getElementById(id);
+let wide = window.matchMedia('(min-width: 700px)').matches;
+let viewStart = startOfDay(new Date());
+let chosenStart = null;
+
+function startOfDay(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function addDays(d, n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()+n); }
+function fmtTime(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+function fmtDay(d){ return d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'}); }
+function dayKey(d){ return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); }
+function windowDays(){ return wide ? 7 : 1; }
+
+async function loadEventType(){
+  const r = await fetch('/event-types/' + encodeURIComponent(slug));
+  if (r.status === 404){ el('title').textContent = 'Not available'; el('notfound').classList.remove('hidden'); return false; }
+  if (!r.ok){ el('title').textContent = 'Temporarily unavailable'; return false; }
+  const et = await r.json();
+  el('title').textContent = et.name;
+  el('subtitle').textContent = et.durationMinutes + ' min';
+  return true;
+}
+
+async function loadSlots(){
+  el('tzLabel').textContent = 'Times shown in ' + tz;
+  const n = windowDays();
+  const from = viewStart, to = addDays(viewStart, n);
+  el('rangeLabel').textContent = n === 1 ? fmtDay(from) : (fmtDay(from) + ' – ' + fmtDay(addDays(from, n-1)));
+  el('days').className = 'days' + (wide ? ' week' : '');
+  el('days').innerHTML = ''; el('slotsMsg').textContent = 'Loading…';
+  let slots = [];
+  try {
+    const r = await fetch('/book/' + encodeURIComponent(slug) + '/slots?from=' + from.toISOString() + '&to=' + to.toISOString());
+    if (r.status === 404){ el('notfound').classList.remove('hidden'); el('picker').classList.add('hidden'); return; }
+    if (r.status === 502){ el('slotsMsg').textContent = 'Calendar temporarily unavailable — try again.'; return; }
+    if (!r.ok){ el('slotsMsg').textContent = 'Could not load times.'; return; }
+    slots = await r.json();
+  } catch(e){ el('slotsMsg').textContent = 'Could not load times.'; return; }
+  const byDay = {};
+  for (const s of slots){ const k = dayKey(new Date(s.start)); (byDay[k] = byDay[k] || []).push(s); }
+  for (let i=0; i<n; i++){
+    const d = addDays(from, i);
+    const col = document.createElement('div'); col.className = 'day';
+    const h = document.createElement('h3'); h.textContent = fmtDay(d); col.appendChild(h);
+    const list = document.createElement('div'); list.className = 'slots';
+    const daySlots = byDay[dayKey(d)] || [];
+    if (daySlots.length === 0){ const m = document.createElement('div'); m.className='muted'; m.textContent='—'; list.appendChild(m); }
+    for (const s of daySlots){
+      const b = document.createElement('button'); b.className='slot'; b.textContent = fmtTime(s.start);
+      b.onclick = () => choose(s.start, b); list.appendChild(b);
+    }
+    col.appendChild(list); el('days').appendChild(col);
+  }
+  el('slotsMsg').textContent = slots.length === 0 ? 'No times available in this range.' : '';
+}
+
+function choose(startIso, btn){
+  chosenStart = startIso;
+  document.querySelectorAll('.slot.selected').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  el('chosen').textContent = 'Selected: ' + new Date(startIso).toLocaleString([], {dateStyle:'full', timeStyle:'short'}) + ' (' + tz + ')';
+  el('formCard').classList.remove('hidden'); el('done').classList.add('hidden'); el('formMsg').textContent = ''; el('name').focus();
+}
+
+el('prev').onclick = () => { viewStart = addDays(viewStart, -windowDays()); loadSlots(); };
+el('next').onclick = () => { viewStart = addDays(viewStart, windowDays()); loadSlots(); };
+window.matchMedia('(min-width: 700px)').addEventListener('change', e => { wide = e.matches; loadSlots(); });
+
+el('bookForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  if (!chosenStart) return;
+  el('submitBtn').disabled = true; el('formMsg').textContent = '';
+  try {
+    const r = await fetch('/book/' + encodeURIComponent(slug), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ attendeeName: el('name').value, attendeeEmail: el('email').value, start: chosenStart })
+    });
+    if (r.status === 201){
+      const c = await r.json();
+      el('formCard').classList.add('hidden'); el('done').classList.remove('hidden');
+      el('done').innerHTML = '<div class="ok"><strong>Booked!</strong></div><div>' + c.eventType +
+        ' on ' + new Date(c.start).toLocaleString([], {dateStyle:'full', timeStyle:'short'}) + ' (' + tz +
+        ')</div><div class="muted">A calendar invite is on its way to ' + el('email').value + '.</div>';
+      return;
+    }
+    if (r.status === 409){ el('formMsg').innerHTML = '<span class="error">That time was just taken — please pick another.</span>'; el('formCard').classList.add('hidden'); chosenStart = null; loadSlots(); return; }
+    if (r.status === 404){ el('formMsg').innerHTML = '<span class="error">Event type not found.</span>'; return; }
+    if (r.status === 502){ el('formMsg').innerHTML = '<span class="error">Calendar temporarily unavailable — try again.</span>'; return; }
+    const t = await r.text(); el('formMsg').innerHTML = '<span class="error">' + (t || 'Could not book.') + '</span>';
+  } catch(e){ el('formMsg').innerHTML = '<span class="error">Network error — try again.</span>'; }
+  finally { el('submitBtn').disabled = false; }
+});
+
+(async () => { if (await loadEventType()){ el('picker').classList.remove('hidden'); loadSlots(); } })();
+</script>
+</body>
+</html>
