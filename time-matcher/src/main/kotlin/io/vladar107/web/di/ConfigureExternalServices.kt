@@ -34,6 +34,7 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
     // The poll loop (configureTelegramBot) only starts when a real token is configured.
     val telegramToken = application.environment.config.propertyOrNull("telegram.botToken")?.getString() ?: ""
     bind<TelegramApi>() with singleton { TelegramApi(telegramToken, HttpClient(CIO) { install(ContentNegotiation) { json() } }) }
+    bind<ConnectStateStore>() with singleton { ConnectStateStore(instance()) }
 
     val provider = application.environment.config.propertyOrNull("calendar.provider")?.getString() ?: "inmemory"
     if (provider == "google") {
@@ -45,7 +46,6 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
         bind<GoogleTokenManager>() with singleton { GoogleTokenManager(req("google.clientId"), req("google.clientSecret"), httpClient, instance()) }
         bind<GoogleCalendarApi>() with singleton { GoogleCalendarApi(httpClient) }
         bind<GoogleOAuthApi>() with singleton { GoogleOAuthApi(req("google.clientId"), req("google.clientSecret"), "$redirectBase/oauth/google/callback", httpClient) }
-        bind<ConnectStateStore>() with singleton { ConnectStateStore(instance()) }
         bind<CalendarProvider>() with singleton { GoogleCalendarProvider(instance(), instance(), instance()) }
         bind<CalendarWriter>() with singleton { GoogleCalendarWriter(instance(), instance(), instance()) }
         bind<CalendarBusyWriter>() with singleton { NoOpCalendarBusyWriter() }

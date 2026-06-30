@@ -15,7 +15,6 @@ import io.vladar107.infrastructure.CommandProvider
 import io.vladar107.infrastructure.QueryProvider
 import io.vladar107.module
 import io.vladar107.web.oauth.ConnectStateStore
-import kotlinx.coroutines.runBlocking
 import java.time.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -24,10 +23,10 @@ import kotlin.test.assertTrue
 class TelegramBotTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
     private val sent = mutableListOf<String>()
-    private fun api() = TelegramApi("TOK", HttpClient(MockEngine { req ->
+    private fun api(): TelegramApi { sent.clear(); return TelegramApi("TOK", HttpClient(MockEngine { req ->
         if (req.url.toString().contains("/sendMessage")) sent += (req.body as io.ktor.http.content.TextContent).text
         respond("""{"ok":true,"result":{}}""", HttpStatusCode.OK, jsonHeaders)
-    }) { install(ContentNegotiation) { json() } })
+    }) { install(ContentNegotiation) { json() } }) }
     private fun msg(uid: Long, text: String) = TgUpdate(1, message = TgMessage(10, TgUser(uid), TgChat(uid), text))
 
     @Test fun nonHostSenderIsIgnored() = testApplication {

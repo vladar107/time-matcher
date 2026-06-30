@@ -78,6 +78,7 @@ class TelegramBot(
                 }
                 api.sendMessage(chatId, text, buttons)
             }
+            null -> { }
             else -> api.sendMessage(chatId, "Unknown command. Try /help.")
         }
     }
