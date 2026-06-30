@@ -7,8 +7,11 @@ import io.vladar107.application.booking.FindEventTypeSlotsQuery
 import io.vladar107.application.booking.FindEventTypeSlotsQueryHandler
 import io.vladar107.application.booking.GetEventTypeBySlugQuery
 import io.vladar107.application.booking.GetEventTypeBySlugQueryHandler
+import io.vladar107.application.booking.ListConnectedCalendarsQuery
+import io.vladar107.application.booking.ListConnectedCalendarsQueryHandler
 import io.vladar107.application.booking.ListEventTypesQuery
 import io.vladar107.application.booking.ListEventTypesQueryHandler
+import io.vladar107.domain.booking.ConnectedCalendar
 import io.vladar107.domain.booking.EventType
 import io.vladar107.infrastructure.QueryHandler
 import org.kodein.di.DI
@@ -28,5 +31,8 @@ fun DI.MainBuilder.configureQueries() {
     }
     bind<QueryHandler<AvailableSlots?, FindEventTypeSlotsQuery>>() with provider {
         FindEventTypeSlotsQueryHandler(instance(), instance(), instance(), instance())
+    }
+    bind<QueryHandler<List<ConnectedCalendar>, ListConnectedCalendarsQuery>>() with provider {
+        ListConnectedCalendarsQueryHandler(instance())
     }
 }

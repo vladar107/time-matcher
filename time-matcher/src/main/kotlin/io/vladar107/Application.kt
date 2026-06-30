@@ -10,6 +10,8 @@ import io.vladar107.web.availability.configureAvailability
 import io.vladar107.web.booking.configureBooking
 import io.vladar107.web.booking.configureBookingPage
 import io.vladar107.web.booking.configureEventTypes
+import io.vladar107.web.oauth.configureGoogleOAuth
+import io.vladar107.web.telegram.configureTelegramBot
 import io.vladar107.web.user.configureUser
 
 fun main(args: Array<String>) {
@@ -27,4 +29,6 @@ fun Application.module() {
     configureEventTypes()
     configureBooking()
     configureBookingPage()
+    configureGoogleOAuth()
+    configureTelegramBot()
 }

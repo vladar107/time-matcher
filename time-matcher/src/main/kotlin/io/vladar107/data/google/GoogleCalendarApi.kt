@@ -28,13 +28,12 @@ import java.time.Instant
 @Serializable private data class EventInsertRequest(val summary: String, val start: EventTime, val end: EventTime, val attendees: List<EventAttendee> = emptyList())
 
 class GoogleCalendarApi(
-    private val tokenSource: GoogleTokenSource,
     private val httpClient: HttpClient,
 ) {
-    suspend fun freeBusy(calendarId: String, window: TimeInterval): List<TimeInterval> {
+    suspend fun freeBusy(accessToken: String, calendarId: String, window: TimeInterval): List<TimeInterval> {
         val resp = call {
             httpClient.post("https://www.googleapis.com/calendar/v3/freeBusy") {
-                header(HttpHeaders.Authorization, "Bearer ${tokenSource.accessToken()}")
+                header(HttpHeaders.Authorization, "Bearer $accessToken")
                 contentType(ContentType.Application.Json)
                 setBody(FreeBusyRequest(window.start.toString(), window.end.toString(), listOf(FbItem(calendarId))))
             }
@@ -49,11 +48,11 @@ class GoogleCalendarApi(
         return cal.busy.map { TimeInterval(Instant.parse(it.start), Instant.parse(it.end)) }
     }
 
-    suspend fun insertEvent(calendarId: String, event: CalendarEvent) {
+    suspend fun insertEvent(accessToken: String, calendarId: String, event: CalendarEvent) {
         val attendees = if (event.attendeeEmail != null) listOf(EventAttendee(event.attendeeEmail, event.attendeeName)) else emptyList()
         call {
             httpClient.post("https://www.googleapis.com/calendar/v3/calendars/$calendarId/events?sendUpdates=all") {
-                header(HttpHeaders.Authorization, "Bearer ${tokenSource.accessToken()}")
+                header(HttpHeaders.Authorization, "Bearer $accessToken")
                 contentType(ContentType.Application.Json)
                 setBody(EventInsertRequest(event.title, EventTime(event.interval.start.toString()), EventTime(event.interval.end.toString()), attendees))
             }

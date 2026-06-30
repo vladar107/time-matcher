@@ -29,5 +29,9 @@ object EventTypeTable : Table("event_type") {
 
 object ConnectedCalendarTable : Table("connected_calendar") {
     val id = uuid("id"); val name = varchar("name", 256); val provider = varchar("provider", 32); val createdAt = varchar("created_at", 64)
+    val accountEmail = varchar("account_email", 256).nullable()
+    val externalCalendarId = varchar("external_calendar_id", 256).nullable()
+    val refreshToken = varchar("refresh_token", 512).nullable()
+    val isBookingTarget = bool("is_booking_target")
     override val primaryKey = PrimaryKey(id)
 }

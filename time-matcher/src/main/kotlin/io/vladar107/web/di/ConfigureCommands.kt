@@ -5,8 +5,14 @@ import io.vladar107.application.availability.AddBusyBlockCommandHandler
 import io.vladar107.application.booking.BookSlotCommand
 import io.vladar107.application.booking.BookSlotCommandHandler
 import io.vladar107.application.booking.BookingResult
+import io.vladar107.application.booking.ConnectGoogleCalendarCommand
+import io.vladar107.application.booking.ConnectGoogleCalendarCommandHandler
 import io.vladar107.application.booking.CreateEventTypeCommand
 import io.vladar107.application.booking.CreateEventTypeCommandHandler
+import io.vladar107.application.booking.RemoveConnectedCalendarCommand
+import io.vladar107.application.booking.RemoveConnectedCalendarCommandHandler
+import io.vladar107.application.booking.SetBookingTargetCommand
+import io.vladar107.application.booking.SetBookingTargetCommandHandler
 import io.vladar107.application.booking.SetSettingsCommand
 import io.vladar107.application.booking.SetSettingsCommandHandler
 import io.vladar107.application.userCreation.CreatUserCommand
@@ -33,5 +39,14 @@ fun DI.MainBuilder.configureCommands() {
     }
     bind<CommandHandler<BookingResult, BookSlotCommand>>() with singleton {
         BookSlotCommandHandler(instance(), instance(), instance(), instance(), instance(), instance())
+    }
+    bind<CommandHandler<Unit, ConnectGoogleCalendarCommand>>() with provider {
+        ConnectGoogleCalendarCommandHandler(instance())
+    }
+    bind<CommandHandler<Unit, RemoveConnectedCalendarCommand>>() with provider {
+        RemoveConnectedCalendarCommandHandler(instance())
+    }
+    bind<CommandHandler<Unit, SetBookingTargetCommand>>() with provider {
+        SetBookingTargetCommandHandler(instance())
     }
 }

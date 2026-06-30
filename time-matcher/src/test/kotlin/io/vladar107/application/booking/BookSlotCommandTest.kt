@@ -47,7 +47,12 @@ class BookSlotCommandTest {
             provider, writer,
             object : ConnectedCalendarRepository {
                 override suspend fun list() = listOf(ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY"))
-                override suspend fun default() = ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY") },
+                override suspend fun default() = ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY")
+                override suspend fun googleCalendars() = emptyList<ConnectedCalendar>()
+                override suspend fun bookingTarget() = null
+                override suspend fun add(calendar: ConnectedCalendar) {}
+                override suspend fun remove(id: UUID) {}
+                override suspend fun setBookingTarget(id: UUID) {} },
             Clock.fixed(t("2020-01-01T00:00:00Z"), zone))
     }
 
@@ -91,6 +96,11 @@ class BookSlotCommandTest {
             object : ConnectedCalendarRepository {
                 override suspend fun list() = listOf(ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY"))
                 override suspend fun default() = ConnectedCalendar(UUID.randomUUID(), "Default", "IN_MEMORY")
+                override suspend fun googleCalendars() = emptyList<ConnectedCalendar>()
+                override suspend fun bookingTarget() = null
+                override suspend fun add(calendar: ConnectedCalendar) {}
+                override suspend fun remove(id: UUID) {}
+                override suspend fun setBookingTarget(id: UUID) {}
             },
             Clock.fixed(t("2020-01-01T00:00:00Z"), zone))
         // Slot [09:00,10:00] should be blocked because the pre-buffer of the 10:00 busy event reaches 09:30

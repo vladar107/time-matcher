@@ -11,10 +11,13 @@ import io.vladar107.application.availability.CalendarWriter
 import io.vladar107.data.google.GoogleCalendarApi
 import io.vladar107.data.google.GoogleCalendarProvider
 import io.vladar107.data.google.GoogleCalendarWriter
-import io.vladar107.data.google.GoogleTokenSource
+import io.vladar107.data.google.GoogleOAuthApi
+import io.vladar107.data.google.GoogleTokenManager
 import io.vladar107.data.persistence.Db
 import io.vladar107.data.repositories.InMemoryCalendarProvider
 import io.vladar107.data.repositories.NoOpCalendarBusyWriter
+import io.vladar107.data.telegram.TelegramApi
+import io.vladar107.web.oauth.ConnectStateStore
 import org.kodein.di.DI
 import org.kodein.di.bind
 import org.kodein.di.instance
@@ -27,20 +30,24 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
     Db.init(url)
     bind<Clock>() with singleton { Clock.systemDefaultZone() }
 
+    // Bind TelegramApi unconditionally so both google and in-memory modes can resolve it.
+    // The poll loop (configureTelegramBot) only starts when a real token is configured.
+    val telegramToken = application.environment.config.propertyOrNull("telegram.botToken")?.getString() ?: ""
+    bind<TelegramApi>() with singleton { TelegramApi(telegramToken, HttpClient(CIO) { install(ContentNegotiation) { json() } }) }
+    bind<ConnectStateStore>() with singleton { ConnectStateStore(instance()) }
+
     val provider = application.environment.config.propertyOrNull("calendar.provider")?.getString() ?: "inmemory"
     if (provider == "google") {
         val cfg = application.environment.config
         fun req(k: String) = cfg.propertyOrNull(k)?.getString()?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Missing config: $k")
-        val httpClient = HttpClient(CIO) {
-            install(ContentNegotiation) { json() }
-        }
-        val tokenSource = GoogleTokenSource(
-            req("google.clientId"), req("google.clientSecret"), req("google.refreshToken"), httpClient, java.time.Clock.systemUTC())
-        val api = GoogleCalendarApi(tokenSource, httpClient)
-        val calendarId = cfg.propertyOrNull("google.calendarId")?.getString()?.takeIf { it.isNotBlank() } ?: "primary"
-        bind<CalendarProvider>() with singleton { GoogleCalendarProvider(api, calendarId) }
-        bind<CalendarWriter>() with singleton { GoogleCalendarWriter(api, calendarId) }
+        val httpClient = HttpClient(CIO) { install(ContentNegotiation) { json() } }
+        val redirectBase = cfg.propertyOrNull("oauth.redirectBaseUrl")?.getString() ?: "http://localhost:8080"
+        bind<GoogleTokenManager>() with singleton { GoogleTokenManager(req("google.clientId"), req("google.clientSecret"), httpClient, instance()) }
+        bind<GoogleCalendarApi>() with singleton { GoogleCalendarApi(httpClient) }
+        bind<GoogleOAuthApi>() with singleton { GoogleOAuthApi(req("google.clientId"), req("google.clientSecret"), "$redirectBase/oauth/google/callback", httpClient) }
+        bind<CalendarProvider>() with singleton { GoogleCalendarProvider(instance(), instance(), instance()) }
+        bind<CalendarWriter>() with singleton { GoogleCalendarWriter(instance(), instance(), instance()) }
         bind<CalendarBusyWriter>() with singleton { NoOpCalendarBusyWriter() }
     } else {
         bind<InMemoryCalendarProvider>() with singleton { InMemoryCalendarProvider() }

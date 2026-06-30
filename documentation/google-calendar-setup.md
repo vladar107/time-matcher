@@ -20,27 +20,23 @@ This guide walks through the one-time steps to connect Time Matcher to your Goog
 4. Under **Test users**, click **Add users** and add your own Google account email. This lets you authenticate while the app is in "Testing" mode.
 5. Save and continue.
 
-## 4. Create an OAuth client (Desktop type)
+## 4. Create an OAuth client (Web application type)
 
 1. Go to **APIs & Services** → **Credentials**.
 2. Click **Create credentials** → **OAuth client ID**.
-3. Choose **Desktop app** as the application type. Give it a name and click **Create**.
-4. Copy the **Client ID** and **Client Secret** — you will need them in step 6.
-
-## 5. Get a refresh token via the OAuth Playground
-
-1. Open [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/).
-2. Click the gear icon (⚙) in the top-right corner and check **Use your own OAuth credentials**.
-3. Enter your **Client ID** and **Client Secret** from step 4, then close the panel.
-4. In the **Step 1** box, find or type the scope:
+3. Choose **Web application** as the application type. Give it a name.
+4. Under **Authorized redirect URIs**, click **Add URI** and enter:
    ```
-   https://www.googleapis.com/auth/calendar
+   http://localhost:8080/oauth/google/callback
    ```
-   Click **Authorize APIs** and sign in with the Google account you added as a test user.
-5. In **Step 2**, click **Exchange authorization code for tokens**.
-6. Copy the **Refresh token** from the response — this is a long-lived credential.
+   (Adjust the base URL if deploying to a remote host.)
+5. Click **Create**. Copy the **Client ID** and **Client Secret** — you will need them below.
 
-> **Keep the refresh token secret.** Anyone with the client secret + refresh token can access your calendar.
+## 5. Create a Telegram bot with BotFather
+
+1. Open Telegram and start a chat with [@BotFather](https://t.me/BotFather).
+2. Send `/newbot`, follow the prompts, and copy the **bot token** it gives you.
+3. Find your own Telegram user ID (e.g. via [@userinfobot](https://t.me/userinfobot)) — copy this number; you'll set it as `TELEGRAM_HOST_USER_ID` (step 6).
 
 ## 6. Run Time Matcher in Google Calendar mode
 
@@ -50,11 +46,12 @@ Set the following environment variables before starting the server:
 CALENDAR_PROVIDER=google
 GOOGLE_CLIENT_ID=<your OAuth client ID>
 GOOGLE_CLIENT_SECRET=<your OAuth client secret>
-GOOGLE_REFRESH_TOKEN=<your refresh token>
-GOOGLE_CALENDAR_ID=primary
+OAUTH_REDIRECT_BASE_URL=http://localhost:8080
+TELEGRAM_BOT_TOKEN=<your bot token>
+TELEGRAM_HOST_USER_ID=<your Telegram user ID>
 ```
 
-`GOOGLE_CALENDAR_ID` defaults to `primary` if omitted. To use a different calendar, set it to the calendar's ID (visible in Google Calendar settings under "Integrate calendar").
+If none of the `GOOGLE_*` / `TELEGRAM_*` variables are set, the service starts in `inmemory` mode with no bot — no credentials required.
 
 ### How env vars map to `application.yaml`
 
@@ -67,11 +64,14 @@ calendar:
 google:
     clientId: "$GOOGLE_CLIENT_ID:"
     clientSecret: "$GOOGLE_CLIENT_SECRET:"
-    refreshToken: "$GOOGLE_REFRESH_TOKEN:"
-    calendarId: "$GOOGLE_CALENDAR_ID:primary"
-```
 
-If none of the variables are set, the service starts in `inmemory` mode (the default) — no Google credentials required.
+oauth:
+    redirectBaseUrl: "$OAUTH_REDIRECT_BASE_URL:http://localhost:8080"
+
+telegram:
+    botToken: "$TELEGRAM_BOT_TOKEN:"
+    hostUserId: "$TELEGRAM_HOST_USER_ID:0"
+```
 
 ### Example: start with env vars
 
@@ -79,7 +79,18 @@ If none of the variables are set, the service starts in `inmemory` mode (the def
 CALENDAR_PROVIDER=google \
 GOOGLE_CLIENT_ID=... \
 GOOGLE_CLIENT_SECRET=... \
-GOOGLE_REFRESH_TOKEN=... \
-GOOGLE_CALENDAR_ID=primary \
+OAUTH_REDIRECT_BASE_URL=http://localhost:8080 \
+TELEGRAM_BOT_TOKEN=... \
+TELEGRAM_HOST_USER_ID=... \
   ./gradlew run
 ```
+
+## 7. Connect via the bot
+
+Once the server is running with the Telegram env vars set:
+
+1. Open Telegram and DM your bot `/connect`.
+2. The bot replies with a link — tap it to open your browser.
+3. You will be redirected to Google's consent page. Approve access.
+4. After approval the browser redirects back to the server and the bot confirms the connection.
+5. To list or remove connected calendars, send `/calendars` to the bot.
