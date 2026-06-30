@@ -131,15 +131,20 @@ el('bookForm').addEventListener('submit', async (ev) => {
     if (r.status === 201){
       const c = await r.json();
       el('formCard').classList.add('hidden'); el('done').classList.remove('hidden');
-      el('done').innerHTML = '<div class="ok"><strong>Booked!</strong></div><div>' + c.eventType +
-        ' on ' + new Date(c.start).toLocaleString([], {dateStyle:'full', timeStyle:'short'}) + ' (' + tz +
-        ')</div><div class="muted">A calendar invite is on its way to ' + el('email').value + '.</div>';
+      el('done').replaceChildren();
+      const ok = document.createElement('div'); ok.className = 'ok';
+      const okStrong = document.createElement('strong'); okStrong.textContent = 'Booked!'; ok.appendChild(okStrong);
+      const detail = document.createElement('div');
+      detail.textContent = c.eventType + ' on ' + new Date(c.start).toLocaleString([], {dateStyle:'full', timeStyle:'short'}) + ' (' + tz + ')';
+      const inv = document.createElement('div'); inv.className = 'muted';
+      inv.textContent = 'A calendar invite is on its way to ' + el('email').value + '.';
+      el('done').append(ok, detail, inv);
       return;
     }
     if (r.status === 409){ el('formMsg').innerHTML = '<span class="error">That time was just taken — please pick another.</span>'; el('formCard').classList.add('hidden'); chosenStart = null; loadSlots(); return; }
     if (r.status === 404){ el('formMsg').innerHTML = '<span class="error">Event type not found.</span>'; return; }
     if (r.status === 502){ el('formMsg').innerHTML = '<span class="error">Calendar temporarily unavailable — try again.</span>'; return; }
-    const t = await r.text(); el('formMsg').innerHTML = '<span class="error">' + (t || 'Could not book.') + '</span>';
+    const t = await r.text(); el('formMsg').replaceChildren(); const span = document.createElement('span'); span.className = 'error'; span.textContent = t || 'Could not book.'; el('formMsg').appendChild(span);
   } catch(e){ el('formMsg').innerHTML = '<span class="error">Network error — try again.</span>'; }
   finally { el('submitBtn').disabled = false; }
 });
