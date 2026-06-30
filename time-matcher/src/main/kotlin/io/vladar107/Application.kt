@@ -5,6 +5,7 @@ import io.vladar107.web.di.configureDi
 import io.vladar107.web.documentation.configureOpenAPI
 import io.vladar107.web.monitoring.configureMonitoring
 import io.vladar107.web.plugins.configureSerialization
+import io.vladar107.web.plugins.configureStatusPages
 import io.vladar107.web.availability.configureAvailability
 import io.vladar107.web.booking.configureBooking
 import io.vladar107.web.booking.configureEventTypes
@@ -19,6 +20,7 @@ fun Application.module() {
     configureOpenAPI()
     configureMonitoring()
     configureSerialization()
+    configureStatusPages()
     configureUser()
     configureAvailability()
     configureEventTypes()
