@@ -13,6 +13,7 @@ import io.vladar107.application.booking.ConnectGoogleCalendarCommand
 import io.vladar107.data.google.GoogleOAuthApi
 import io.vladar107.data.telegram.TelegramApi
 import io.vladar107.infrastructure.CommandProvider
+import org.kodein.di.direct
 import org.kodein.di.instance
 import org.kodein.di.ktor.closestDI
 import java.time.Clock
@@ -87,9 +88,11 @@ fun Application.configureGoogleOAuth() {
             val email = oauthApi.accountEmail(tokens.accessToken)
             commandProvider.run(ConnectGoogleCalendarCommand(email, "primary", tokens.refreshToken))
 
-            // TelegramApi binding is added in Task 6 — resolve it lazily here
-            val telegramApi: TelegramApi by di.instance()
-            runCatching { telegramApi.sendMessage(chatId, "✅ Connected $email") }
+            // TelegramApi binding is added in Task 6 — resolve and send best-effort
+            runCatching {
+                val telegramApi = di.direct.instance<TelegramApi>()
+                telegramApi.sendMessage(chatId, "✅ Connected $email")
+            }.onFailure { call.application.environment.log.warn("Failed to notify Telegram after connect", it) }
 
             call.respondText("✅ Connected $email — you can return to Telegram.", ContentType.Text.Plain)
         }

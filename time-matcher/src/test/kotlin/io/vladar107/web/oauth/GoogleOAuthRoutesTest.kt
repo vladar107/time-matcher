@@ -39,6 +39,8 @@ class GoogleOAuthRoutesTest {
         val location = resp.headers["Location"] ?: ""
         assertTrue(location.startsWith("https://accounts.google.com/o/oauth2/v2/auth"))
         assertTrue(location.contains("state=abc") && location.contains("access_type=offline") && location.contains("prompt=consent"))
+        assertTrue(location.contains("redirect_uri="))
+        assertTrue(location.contains("calendar"))
     }
 
     @Test fun callbackWithInvalidStateIs400() = testApplication {
