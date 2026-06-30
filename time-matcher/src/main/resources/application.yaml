@@ -7,3 +7,12 @@ ktor:
 
 db:
     url: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+
+calendar:
+    provider: "inmemory"   # or "google"
+
+google:
+    clientId: ""
+    clientSecret: ""
+    refreshToken: ""
+    calendarId: "primary"
