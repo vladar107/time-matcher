@@ -4,6 +4,8 @@ C4 Container Diagram
 
 > Phase 2a (implemented): EventTypes + booking. Config (settings, event types, connected calendars) in H2; bookings written to the calendar via the CalendarWriter port. Real Google calendar + host auth are later slices.
 
+> Phase 2c (implemented): public booking page at `GET /book/{slug}` — a self-contained HTML/JS page (attendee timezone; 1-day mobile / 7-day desktop) driving the booking JSON API. (Host admin Telegram bot and deployment are separate, later.)
+
 ```mermaid
 C4Container
 title C4 Container Diagram
