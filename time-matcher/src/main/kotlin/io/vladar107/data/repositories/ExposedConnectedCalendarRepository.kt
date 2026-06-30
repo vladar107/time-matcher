@@ -31,7 +31,8 @@ class ExposedConnectedCalendarRepository : ConnectedCalendarRepository {
     }
 
     override suspend fun default(): ConnectedCalendar = transaction {
-        ConnectedCalendarTable.selectAll().first().let(::map)
+        ConnectedCalendarTable.selectAll().orderBy(ConnectedCalendarTable.createdAt, SortOrder.ASC).firstOrNull()?.let(::map)
+            ?: error("No connected calendar configured")
     }
 
     override suspend fun googleCalendars(): List<ConnectedCalendar> = transaction {

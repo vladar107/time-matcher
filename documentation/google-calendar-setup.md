@@ -36,7 +36,7 @@ This guide walks through the one-time steps to connect Time Matcher to your Goog
 
 1. Open Telegram and start a chat with [@BotFather](https://t.me/BotFather).
 2. Send `/newbot`, follow the prompts, and copy the **bot token** it gives you.
-3. Find your own Telegram user ID (e.g. via [@userinfobot](https://t.me/userinfobot)).
+3. Find your own Telegram user ID (e.g. via [@userinfobot](https://t.me/userinfobot)) — copy this number; you'll set it as `TELEGRAM_HOST_USER_ID` (step 6).
 
 ## 6. Run Time Matcher in Google Calendar mode
 

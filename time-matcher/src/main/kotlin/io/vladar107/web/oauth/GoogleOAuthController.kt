@@ -63,6 +63,9 @@ fun Application.configureGoogleOAuth() {
                 ?: return@get call.respond(HttpStatusCode.BadRequest, "missing state")
             val di = closestDI { this@configureGoogleOAuth }
             val oauthApi: GoogleOAuthApi by di.instance()
+            // `state` is forwarded to Google unvalidated by design: the redirect host is always Google,
+            // and the real gate is the callback, which only accepts nonces this process minted
+            // (ConnectStateStore.consume → 400 on unknown/expired). Do not add validation here.
             call.respondRedirect(oauthApi.authorizationUrl(state))
         }
 
