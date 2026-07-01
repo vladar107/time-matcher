@@ -41,12 +41,14 @@ cd time-matcher
 
 ## Key endpoints
 
+Primary routes (a legacy `/user` scaffold also exists but is not implemented):
+
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/book/{slug}` | Public booking page (self-contained HTML) |
 | `POST` | `/event-types/{slug}/book` | Book a slot (JSON API) |
 | `GET` | `/availability/slots` | Query available time slots |
-| `GET/PUT` | `/availability/config` | Read / update availability rules |
+| `PUT` | `/availability/config` | Update availability rules (working hours, granularity, timezone) |
 | `GET` | `/event-types` | List event types |
 | `POST` | `/event-types` | Create event type |
 | `POST` | `/telegram/webhook/{secret}` | Telegram webhook (host bot) |

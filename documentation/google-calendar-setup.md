@@ -52,7 +52,7 @@ cp .env.example .env
 
 ```dotenv
 DB_PASSWORD=timematcher          # Postgres password (used by both db and app services)
-CALENDAR_PROVIDER=google         # set to "google" to enable Google Calendar
+CALENDAR_PROVIDER=google         # change from the "inmemory" default in .env.example to "google" to enable Google Calendar
 PUBLIC_BASE_URL=https://your-host.example.com   # public HTTPS base URL (see 6b)
 GOOGLE_CLIENT_ID=<your client ID>
 GOOGLE_CLIENT_SECRET=<your client secret>

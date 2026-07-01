@@ -73,14 +73,12 @@ Toolchain: JDK 25, Kotlin 2.4.0, Ktor 3.5.1 (Netty engine; plugin `io.ktor.plugi
 
 Tests run with `maxParallelForks = 1` — Exposed uses a single global connection/transaction state.
 
-**Runtime endpoints:**
+**Key runtime endpoints** (primary routes; a legacy `/user` scaffold also exists but is not implemented):
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/user` | List users |
-| `POST` | `/user` | Create user |
 | `GET` | `/availability/slots` | Query available slots |
-| `GET /PUT` | `/availability/config` | Read / update availability rules |
+| `PUT` | `/availability/config` | Update availability rules (working hours, granularity, timezone) |
 | `GET` | `/event-types` | List event types |
 | `POST` | `/event-types` | Create event type |
 | `POST` | `/event-types/{slug}/book` | Book a slot |
