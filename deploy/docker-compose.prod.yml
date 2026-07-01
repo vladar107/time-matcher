@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: timematcher
+      POSTGRES_USER: timematcher
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timematcher"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  app:
+    image: ghcr.io/vladar107/time-matcher:latest
+    depends_on:
+      db: { condition: service_healthy }
+    env_file: [.env]
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/timematcher
+      DB_USER: timematcher
+    expose: ["8080"]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    environment:
+      SUBDOMAINS: ${DUCKDNS_DOMAIN}
+      TOKEN: ${DUCKDNS_TOKEN}
+    restart: unless-stopped
+  backup:
+    image: prodrigestivill/postgres-backup-local:17
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: timematcher
+      POSTGRES_USER: timematcher
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: "7"
+    volumes: [./backups:/backups]
+    restart: unless-stopped
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
