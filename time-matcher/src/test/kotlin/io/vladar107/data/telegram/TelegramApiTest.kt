@@ -42,6 +42,7 @@ class TelegramApiTest {
         api.setWebhook("https://h/telegram/webhook/s3cr3t", "s3cr3t")
         assertTrue(captured.contains("https://h/telegram/webhook/s3cr3t"))
         assertTrue(captured.contains("secret_token") && captured.contains("s3cr3t"))
+        assertTrue(captured.contains("\"drop_pending_updates\":true"))
     }
 
     @Test fun setWebhookThrowsOnNonSuccess() = runBlocking<Unit> {
