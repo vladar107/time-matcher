@@ -108,22 +108,25 @@ Your public base URL is **`https://<name>.duckdns.org`** — reused for the Goog
 
 1. Generate an SSH deploy key pair locally: `ssh-keygen -t ed25519 -f deploy_key -N ''`.
 2. Add the **public** half (`deploy_key.pub`) to the VM's `~/.ssh/authorized_keys`.
-3. Repo → **Settings → Secrets and variables → Actions** → add:
+3. Repo → **Settings → Secrets and variables → Actions** → add **Secrets**:
    - `SSH_HOST` = the VM public IP
    - `SSH_USER` = `ubuntu`
    - `SSH_KEY` = the **private** key (`deploy_key` contents)
-4. After the first workflow run pushes the image, make the **GHCR package public**: repo → Packages → the package → Package settings → Change visibility → Public. (Public → the VM pulls with no auth.)
-5. **SSH hardening on the VM:** disable password auth (`PasswordAuthentication no` in `sshd_config`), keys only; optional `fail2ban`.
+4. After the VM is ready and `.env` is in place, enable the deploy job: **Settings → Secrets and variables → Actions → Variables** → add variable `DEPLOY_ENABLED` = `true`. The deploy workflow is gated on this variable; leave it unset until the VM is fully provisioned to avoid failed deploy runs.
+5. After the first workflow run pushes the image, make the **GHCR package public**: repo → Packages → the package → Package settings → Change visibility → Public. (Public → the VM pulls with no auth.)
+6. **SSH hardening on the VM:** disable password auth (`PasswordAuthentication no` in `sshd_config`), keys only; optional `fail2ban`.
 
 ---
 
 ## 7. VM prep for the app
 
-Create the deploy directory and get the compose + Caddyfile onto the VM (the repo provides them under `deploy/`; either `git clone` the repo on the VM or `scp` the `deploy/` folder):
+Create the deploy directory on the VM. The deploy workflow (`deploy.yml`) automatically scps the `deploy/` folder contents (`docker-compose.prod.yml`, `Caddyfile`) to `/opt/time-matcher` on every deploy — **you do not need to place them manually**.
+
 ```bash
 sudo mkdir -p /opt/time-matcher && sudo chown ubuntu:ubuntu /opt/time-matcher
-# place docker-compose.prod.yml + Caddyfile here (from the repo's deploy/ dir)
 ```
+
+Place the `.env` file here (see §8) before the first deploy run.
 
 ---
 
@@ -148,15 +151,18 @@ TELEGRAM_BOT_TOKEN=<from §5>
 TELEGRAM_HOST_USER_ID=<your numeric id from §5>
 TELEGRAM_WEBHOOK_SECRET=<from §5>
 
+# --- Public hostname (DuckDNS) ---
+PUBLIC_HOSTNAME=<name>.duckdns.org
+DUCKDNS_DOMAIN=<name>
+DUCKDNS_TOKEN=<from §2>
+
 # --- Observability (Grafana Cloud OTLP) ---
+OTEL_SDK_DISABLED=false
 OTEL_SERVICE_NAME=time-matcher
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-<region>.grafana.net/otlp
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64(instanceID:token) from §3>
-
-# --- DuckDNS updater ---
-DUCKDNS_DOMAIN=<name>
-DUCKDNS_TOKEN=<from §2>
+OTEL_LOGS_EXPORTER=otlp
 ```
 
 ---
