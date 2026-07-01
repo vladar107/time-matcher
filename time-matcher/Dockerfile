@@ -13,6 +13,8 @@ FROM eclipse-temurin:25-jre AS train
 WORKDIR /train
 COPY --from=build /app.jar /train/app.jar
 COPY --from=build /src/src/main/resources/logback.xml /train/logback.xml
+# Dummy creds so the app boots far enough to record the AOT cache; H2 in-memory keeps
+# the training run self-contained. Confined to this stage — never copied into base/final.
 ENV CALENDAR_PROVIDER=google GOOGLE_CLIENT_ID=dummy GOOGLE_CLIENT_SECRET=dummy \
     DB_URL="jdbc:h2:mem:train;DB_CLOSE_DELAY=-1"
 RUN timeout --signal=TERM 30 \

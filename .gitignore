@@ -97,3 +97,6 @@ docs/superpowers/
 .env.*
 !.env.example
 
+# Postgres backup dumps written by the prod compose backup sidecar
+deploy/backups/
+
