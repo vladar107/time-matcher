@@ -42,7 +42,7 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
         fun req(k: String) = cfg.propertyOrNull(k)?.getString()?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Missing config: $k")
         val httpClient = HttpClient(CIO) { install(ContentNegotiation) { json() } }
-        val redirectBase = cfg.propertyOrNull("oauth.redirectBaseUrl")?.getString() ?: "http://localhost:8080"
+        val redirectBase = cfg.propertyOrNull("publicBaseUrl")?.getString() ?: "http://localhost:8080"
         bind<GoogleTokenManager>() with singleton { GoogleTokenManager(req("google.clientId"), req("google.clientSecret"), httpClient, instance()) }
         bind<GoogleCalendarApi>() with singleton { GoogleCalendarApi(httpClient) }
         bind<GoogleOAuthApi>() with singleton { GoogleOAuthApi(req("google.clientId"), req("google.clientSecret"), "$redirectBase/oauth/google/callback", httpClient) }

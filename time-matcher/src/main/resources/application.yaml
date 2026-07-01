@@ -15,9 +15,9 @@ google:
     clientId: "$GOOGLE_CLIENT_ID:"
     clientSecret: "$GOOGLE_CLIENT_SECRET:"
 
-oauth:
-    redirectBaseUrl: "$OAUTH_REDIRECT_BASE_URL:http://localhost:8080"
+publicBaseUrl: "$PUBLIC_BASE_URL:http://localhost:8080"
 
 telegram:
     botToken: "$TELEGRAM_BOT_TOKEN:"
     hostUserId: "$TELEGRAM_HOST_USER_ID:0"
+    webhookSecret: "$TELEGRAM_WEBHOOK_SECRET:"

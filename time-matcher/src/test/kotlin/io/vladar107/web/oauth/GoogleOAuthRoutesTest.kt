@@ -29,7 +29,7 @@ class GoogleOAuthRoutesTest {
         "db.url" to "jdbc:h2:mem:oauth-${java.util.UUID.randomUUID()};DB_CLOSE_DELAY=-1",
         "calendar.provider" to "google",
         "google.clientId" to "cid", "google.clientSecret" to "sec",
-        "oauth.redirectBaseUrl" to "http://localhost:8080")
+        "publicBaseUrl" to "http://localhost:8080")
 
     @Test fun startRedirectsToGoogleConsent() = testApplication {
         environment { config = cfg() }; application { module() }
