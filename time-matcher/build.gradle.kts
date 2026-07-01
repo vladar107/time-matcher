@@ -1,3 +1,7 @@
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
+
 val ktor_version: String by project
 val kotlin_version: String by project
 val logback_version: String by project
@@ -68,3 +72,65 @@ dependencies {
 kotlin { jvmToolchain(25) }
 
 tasks.test { maxParallelForks = 1 }
+
+// Patch the Flyway services file after shadowJar: shadow 9.x does not properly merge
+// META-INF/services when the same file exists in flyway-core AND flyway-database-postgresql.
+// The postgresql module's file overwrites flyway-core's, losing H2/SQLite support.
+// Fix: use 'zip -u' to update the fat JAR with a correctly merged services file.
+tasks.register("patchFlywayServices") {
+    dependsOn("shadowJar")
+    val shadowTask = tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar")
+    inputs.files(shadowTask.map { it.archiveFile })
+    inputs.files(configurations.runtimeClasspath)
+    outputs.upToDateWhen { false }
+
+    doLast("patch flyway services") {
+        val serviceFile = "META-INF/services/org.flywaydb.core.extensibility.Plugin"
+        val fatJar = shadowTask.get().archiveFile.get().asFile
+
+        val flywayCore = configurations["runtimeClasspath"].resolvedConfiguration
+            .resolvedArtifacts
+            .first { it.moduleVersion.id.module.group == "org.flywaydb" && it.moduleVersion.id.module.name == "flyway-core" }
+            .file
+
+        // Read the full list of service entries from flyway-core and the fat JAR
+        val allEntries = mutableListOf<String>()
+        ZipFile(flywayCore).use { zip ->
+            val e = zip.getEntry(serviceFile)
+            if (e != null) allEntries.addAll(zip.getInputStream(e).bufferedReader().readLines())
+        }
+        ZipFile(fatJar).use { zip ->
+            val e = zip.getEntry(serviceFile)
+            if (e != null) allEntries.addAll(zip.getInputStream(e).bufferedReader().readLines())
+        }
+        val merged = allEntries.filter { it.isNotBlank() }.distinct()
+        logger.lifecycle("Merged Flyway service entries: $merged")
+
+        // Write merged file to temp dir and zip-update the fat JAR
+        val mergedContent = (merged.joinToString("\n") + "\n").toByteArray()
+        logger.lifecycle("Patching fat JAR in-place with ${merged.size} merged service entries")
+
+        // Rewrite the JAR, replacing only the services file entry
+        val tmpJar = File(fatJar.parentFile, "${fatJar.name}.tmp")
+        ZipFile(fatJar).use { inZip ->
+            ZipOutputStream(tmpJar.outputStream().buffered()).use { outZip ->
+                inZip.entries().asSequence().forEach { entry ->
+                    val newEntry = ZipEntry(entry.name)
+                    outZip.putNextEntry(newEntry)
+                    if (!entry.isDirectory) {
+                        if (entry.name == serviceFile) {
+                            outZip.write(mergedContent)
+                        } else {
+                            inZip.getInputStream(entry).copyTo(outZip)
+                        }
+                    }
+                    outZip.closeEntry()
+                }
+            }
+        }
+        tmpJar.renameTo(fatJar)
+        logger.lifecycle("Fat JAR services patched successfully.")
+    }
+}
+
+tasks.named("buildFatJar") { dependsOn("patchFlywayServices") }
