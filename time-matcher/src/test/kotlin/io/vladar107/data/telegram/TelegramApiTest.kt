@@ -10,25 +10,14 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 class TelegramApiTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
     private fun client(handler: io.ktor.client.engine.mock.MockRequestHandler) =
         HttpClient(MockEngine(handler)) { install(ContentNegotiation) { json() } }
-
-    @Test fun getUpdatesParsesMessageAndCallback() = runBlocking {
-        val body = """{"ok":true,"result":[
-          {"update_id":1,"message":{"message_id":10,"from":{"id":42},"chat":{"id":42},"text":"/connect"}},
-          {"update_id":2,"callback_query":{"id":"cb1","from":{"id":42},"data":"remove:abc"}}]}"""
-        val api = TelegramApi("TOK", client { respond(body, HttpStatusCode.OK, jsonHeaders) })
-        val updates = api.getUpdates(0)
-        assertEquals(2, updates.size)
-        assertEquals("/connect", updates[0].message?.text)
-        assertEquals("remove:abc", updates[1].callbackQuery?.data)
-    }
 
     @Test fun sendMessagePostsChatIdTextAndInlineKeyboard() = runBlocking {
         var captured = ""
@@ -43,5 +32,20 @@ class TelegramApiTest {
         assertTrue(captured.contains("\"url\":\"https://h/x\""))
         assertFalse(captured.contains("\"callback_data\":null"))
         assertFalse(captured.contains("\"url\":null"))
+    }
+
+    @Test fun setWebhookPostsUrlAndSecret() = runBlocking {
+        var captured = ""
+        val api = TelegramApi("TOK", client { req ->
+            if (req.url.toString().contains("/setWebhook")) captured = (req.body as io.ktor.http.content.TextContent).text
+            respond("""{"ok":true,"result":true}""", HttpStatusCode.OK, jsonHeaders) })
+        api.setWebhook("https://h/telegram/webhook/s3cr3t", "s3cr3t")
+        assertTrue(captured.contains("https://h/telegram/webhook/s3cr3t"))
+        assertTrue(captured.contains("secret_token") && captured.contains("s3cr3t"))
+    }
+
+    @Test fun setWebhookThrowsOnNonSuccess() = runBlocking<Unit> {
+        val api = TelegramApi("TOK", client { respond("""{"ok":false}""", HttpStatusCode.InternalServerError, jsonHeaders) })
+        assertFailsWith<TelegramException> { api.setWebhook("https://h/w", "s") }
     }
 }

@@ -16,9 +16,6 @@ import io.vladar107.data.telegram.TgUpdate
 import io.vladar107.infrastructure.CommandProvider
 import io.vladar107.infrastructure.QueryProvider
 import io.vladar107.web.oauth.ConnectStateStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.kodein.di.instance
 import org.kodein.di.ktor.closestDI
@@ -115,19 +112,6 @@ fun Application.configureTelegramBot() {
     val api: TelegramApi by di.instance()
     val stateStore: ConnectStateStore by di.instance()
     val bot = TelegramBot(api, hostUserId, stateStore, CommandProvider(this), QueryProvider(this), redirectBase)
-    launch(Dispatchers.IO) {
-        var offset = 0L
-        while (isActive) {
-            try {
-                val updates = api.getUpdates(offset)
-                for (u in updates) {
-                    offset = u.updateId + 1
-                    bot.handle(u)
-                }
-            } catch (e: Exception) {
-                environment.log.error("Telegram poll loop error", e)
-                delay(3000)
-            }
-        }
-    }
+    // TODO(Task 2): launch webhook listener instead of long-poll loop
+    launch { }
 }
