@@ -1,6 +1,6 @@
 # Google Calendar integration via a single-user refresh token + raw REST
 
-- Status: accepted
+- Status: superseded by [20260701-telegram-host-admin-bot.md](20260701-telegram-host-admin-bot.md)
 - Deciders: vladar107
 - Date: 2026-06-29
 - Tags: integration, calendar, google

@@ -27,37 +27,93 @@ This guide walks through the one-time steps to connect Time Matcher to your Goog
 3. Choose **Web application** as the application type. Give it a name.
 4. Under **Authorized redirect URIs**, click **Add URI** and enter:
    ```
-   http://localhost:8080/oauth/google/callback
+   https://<your-public-host>/oauth/google/callback
    ```
-   (Adjust the base URL if deploying to a remote host.)
+   For local testing with cloudflared use the cloudflared HTTPS URL (see step 6). You can add multiple URIs — add both the cloudflared URL and any deployed URL.
 5. Click **Create**. Copy the **Client ID** and **Client Secret** — you will need them below.
 
 ## 5. Create a Telegram bot with BotFather
 
 1. Open Telegram and start a chat with [@BotFather](https://t.me/BotFather).
 2. Send `/newbot`, follow the prompts, and copy the **bot token** it gives you.
-3. Find your own Telegram user ID (e.g. via [@userinfobot](https://t.me/userinfobot)) — copy this number; you'll set it as `TELEGRAM_HOST_USER_ID` (step 6).
+3. Find your own Telegram user ID (e.g. via [@userinfobot](https://t.me/userinfobot)). Copy this number — it becomes `TELEGRAM_HOST_USER_ID`. The bot silently ignores all messages from any other user ID.
 
-## 6. Run Time Matcher in Google Calendar mode
+## 6. Run with Docker Compose
 
-Set the following environment variables before starting the server:
+The recommended way to run Time Matcher is with Docker Compose, which starts the app and a Postgres database together.
 
+### 6a. Configure environment variables
+
+Copy `.env.example` to `.env` (gitignored) and fill in your values:
+
+```bash
+cp .env.example .env
 ```
-CALENDAR_PROVIDER=google
-GOOGLE_CLIENT_ID=<your OAuth client ID>
-GOOGLE_CLIENT_SECRET=<your OAuth client secret>
-OAUTH_REDIRECT_BASE_URL=http://localhost:8080
+
+```dotenv
+DB_PASSWORD=timematcher          # Postgres password (used by both db and app services)
+CALENDAR_PROVIDER=google         # set to "google" to enable Google Calendar
+PUBLIC_BASE_URL=https://your-host.example.com   # public HTTPS base URL (see 6b)
+GOOGLE_CLIENT_ID=<your client ID>
+GOOGLE_CLIENT_SECRET=<your client secret>
 TELEGRAM_BOT_TOKEN=<your bot token>
 TELEGRAM_HOST_USER_ID=<your Telegram user ID>
+TELEGRAM_WEBHOOK_SECRET=<random secret string>   # e.g. output of: openssl rand -hex 32
 ```
 
-If none of the `GOOGLE_*` / `TELEGRAM_*` variables are set, the service starts in `inmemory` mode with no bot — no credentials required.
+### 6b. Webhooks and OAuth need a public HTTPS URL
+
+Both the Telegram webhook and the Google OAuth callback require a public HTTPS URL. Set `PUBLIC_BASE_URL` to that URL in `.env`. The app registers the webhook at startup (`POST /telegram/webhook/{TELEGRAM_WEBHOOK_SECRET}`) and uses the same base URL for OAuth callbacks (`/oauth/google/callback`).
+
+**For local testing:** use the bundled cloudflared tunnel profile, which assigns a temporary `trycloudflare.com` HTTPS URL:
+
+```bash
+docker compose --profile tunnel up
+```
+
+Copy the printed cloudflared URL (e.g. `https://abc123.trycloudflare.com`) into `PUBLIC_BASE_URL` in `.env`, and add `https://abc123.trycloudflare.com/oauth/google/callback` to the Authorized redirect URIs in your Google Cloud project (step 4). Then restart:
+
+```bash
+docker compose --profile tunnel up --build
+```
+
+### 6c. Start
+
+```bash
+docker compose up --build
+```
+
+This builds the image (including the JDK 25 AOT training pass for fast cold start), starts Postgres, and then starts the app. Flyway migrations run automatically on startup.
+
+## 7. Dev mode (no Docker)
+
+For development without Docker, `./gradlew run` works with H2 (no Postgres required):
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
+cd time-matcher
+CALENDAR_PROVIDER=google \
+PUBLIC_BASE_URL=https://your-cloudflared-url.trycloudflare.com \
+GOOGLE_CLIENT_ID=... \
+GOOGLE_CLIENT_SECRET=... \
+TELEGRAM_BOT_TOKEN=... \
+TELEGRAM_HOST_USER_ID=... \
+TELEGRAM_WEBHOOK_SECRET=... \
+  ./gradlew run
+```
+
+Note: the webhook registration at startup requires a live network connection to Telegram. The OAuth callback and webhook endpoint are functional once the server is reachable at `PUBLIC_BASE_URL`.
 
 ### How env vars map to `application.yaml`
 
-The committed `application.yaml` uses Ktor's YAML environment-variable substitution syntax (`"$VAR:default"`):
+The committed `application.yaml` uses Ktor's YAML environment-variable substitution (`"$VAR:default"`):
 
 ```yaml
+db:
+    url: "$DB_URL:jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+    user: "$DB_USER:sa"
+    password: "$DB_PASSWORD:"
+
 calendar:
     provider: "$CALENDAR_PROVIDER:inmemory"
 
@@ -65,32 +121,20 @@ google:
     clientId: "$GOOGLE_CLIENT_ID:"
     clientSecret: "$GOOGLE_CLIENT_SECRET:"
 
-oauth:
-    redirectBaseUrl: "$OAUTH_REDIRECT_BASE_URL:http://localhost:8080"
+publicBaseUrl: "$PUBLIC_BASE_URL:http://localhost:8080"
 
 telegram:
     botToken: "$TELEGRAM_BOT_TOKEN:"
     hostUserId: "$TELEGRAM_HOST_USER_ID:0"
+    webhookSecret: "$TELEGRAM_WEBHOOK_SECRET:"
 ```
 
-### Example: start with env vars
+## 8. Connect via the bot
 
-```bash
-CALENDAR_PROVIDER=google \
-GOOGLE_CLIENT_ID=... \
-GOOGLE_CLIENT_SECRET=... \
-OAUTH_REDIRECT_BASE_URL=http://localhost:8080 \
-TELEGRAM_BOT_TOKEN=... \
-TELEGRAM_HOST_USER_ID=... \
-  ./gradlew run
-```
-
-## 7. Connect via the bot
-
-Once the server is running with the Telegram env vars set:
+Once the server is running with the Telegram and Google env vars set:
 
 1. Open Telegram and DM your bot `/connect`.
-2. The bot replies with a link — tap it to open your browser.
-3. You will be redirected to Google's consent page. Approve access.
-4. After approval the browser redirects back to the server and the bot confirms the connection.
-5. To list or remove connected calendars, send `/calendars` to the bot.
+2. The bot replies with an inline button — tap **🔗 Connect Google Calendar**.
+3. Your browser opens Google's consent page. Approve access.
+4. After approval the browser redirects back to the server (`/oauth/google/callback`), which stores the refresh token in the database. The bot sends a confirmation message.
+5. To list, set a booking target (★), or remove connected calendars, send `/calendars` to the bot.
