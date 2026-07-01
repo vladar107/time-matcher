@@ -25,13 +25,14 @@ import org.kodein.di.singleton
 import java.time.Clock
 
 fun DI.MainBuilder.configureExternalServices(application: Application) {
-    val url = application.environment.config.propertyOrNull("db.url")?.getString()
+    val cfg = application.environment.config
+    val url = cfg.propertyOrNull("db.url")?.getString()
         ?: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
-    Db.init(url)
+    Db.init(url, cfg.propertyOrNull("db.user")?.getString() ?: "sa", cfg.propertyOrNull("db.password")?.getString() ?: "")
     bind<Clock>() with singleton { Clock.systemDefaultZone() }
 
     // Bind TelegramApi unconditionally so both google and in-memory modes can resolve it.
-    // The poll loop (configureTelegramBot) only starts when a real token is configured.
+    // The Telegram webhook route only registers when a real token is configured.
     val telegramToken = application.environment.config.propertyOrNull("telegram.botToken")?.getString() ?: ""
     bind<TelegramApi>() with singleton { TelegramApi(telegramToken, HttpClient(CIO) { install(ContentNegotiation) { json() } }) }
     bind<ConnectStateStore>() with singleton { ConnectStateStore(instance()) }
@@ -42,7 +43,7 @@ fun DI.MainBuilder.configureExternalServices(application: Application) {
         fun req(k: String) = cfg.propertyOrNull(k)?.getString()?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Missing config: $k")
         val httpClient = HttpClient(CIO) { install(ContentNegotiation) { json() } }
-        val redirectBase = cfg.propertyOrNull("oauth.redirectBaseUrl")?.getString() ?: "http://localhost:8080"
+        val redirectBase = cfg.propertyOrNull("publicBaseUrl")?.getString() ?: "http://localhost:8080"
         bind<GoogleTokenManager>() with singleton { GoogleTokenManager(req("google.clientId"), req("google.clientSecret"), httpClient, instance()) }
         bind<GoogleCalendarApi>() with singleton { GoogleCalendarApi(httpClient) }
         bind<GoogleOAuthApi>() with singleton { GoogleOAuthApi(req("google.clientId"), req("google.clientSecret"), "$redirectBase/oauth/google/callback", httpClient) }

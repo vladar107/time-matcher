@@ -92,3 +92,8 @@ fabric.properties
 docs/superpowers/
 .superpowers/
 
+# Local secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+

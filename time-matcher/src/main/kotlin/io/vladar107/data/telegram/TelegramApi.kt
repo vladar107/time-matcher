@@ -1,8 +1,6 @@
 package io.vladar107.data.telegram
 
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -56,9 +54,11 @@ data class TgButton(
 // ---- Private wire DTOs ----
 
 @Serializable
-private data class TgUpdatesResponse(
-    val ok: Boolean,
-    val result: List<TgUpdate> = emptyList(),
+private data class SetWebhookRequest(
+    val url: String,
+    @SerialName("secret_token") val secretToken: String,
+    // No default: field is always serialized so Telegram sees drop_pending_updates=true explicitly.
+    @SerialName("drop_pending_updates") val dropPendingUpdates: Boolean,
 )
 
 @Serializable
@@ -93,7 +93,7 @@ private val telegramJson = Json {
 }
 
 /**
- * Raw Telegram Bot API client covering the three methods needed by the bot loop.
+ * Raw Telegram Bot API client.
  *
  * @param botToken Bot token issued by @BotFather.
  * @param httpClient Ktor HTTP client with ContentNegotiation/JSON installed.
@@ -103,13 +103,10 @@ class TelegramApi(botToken: String, private val httpClient: HttpClient) {
     private val logger = org.slf4j.LoggerFactory.getLogger(TelegramApi::class.java)
     private val base = "https://api.telegram.org/bot$botToken"
 
-    /**
-     * Fetches pending updates starting from [offset] using long-polling.
-     * Throws on non-2xx so the caller can back off.
-     */
-    suspend fun getUpdates(offset: Long, timeoutSeconds: Int = 25): List<TgUpdate> {
-        val resp = call { httpClient.get("$base/getUpdates?offset=$offset&timeout=$timeoutSeconds") }
-        return resp.body<TgUpdatesResponse>().result
+    /** Registers the webhook URL with Telegram. Throws on non-2xx so startup can log the failure. */
+    suspend fun setWebhook(url: String, secretToken: String) {
+        val body = telegramJson.encodeToString(SetWebhookRequest.serializer(), SetWebhookRequest(url, secretToken, dropPendingUpdates = true))
+        call { httpClient.post("$base/setWebhook") { contentType(ContentType.Application.Json); setBody(body) } }
     }
 
     /**
@@ -163,5 +160,5 @@ class TelegramApi(botToken: String, private val httpClient: HttpClient) {
     }
 }
 
-/** Thrown by [TelegramApi.getUpdates] on network or non-2xx errors. */
+/** Thrown by [TelegramApi] on network or non-2xx errors. */
 class TelegramException(message: String, cause: Throwable? = null) : Exception(message, cause)

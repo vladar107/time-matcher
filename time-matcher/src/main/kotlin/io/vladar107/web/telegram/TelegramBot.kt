@@ -1,10 +1,11 @@
 package io.vladar107.web.telegram
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.serialization.kotlinx.json.json
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
+import io.ktor.server.request.receiveText
+import io.ktor.server.response.respond
+import io.ktor.server.routing.post
+import io.ktor.server.routing.routing
 import io.vladar107.application.booking.ListConnectedCalendarsQuery
 import io.vladar107.application.booking.RemoveConnectedCalendarCommand
 import io.vladar107.application.booking.SetBookingTargetCommand
@@ -16,10 +17,8 @@ import io.vladar107.data.telegram.TgUpdate
 import io.vladar107.infrastructure.CommandProvider
 import io.vladar107.infrastructure.QueryProvider
 import io.vladar107.web.oauth.ConnectStateStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import org.kodein.di.instance
 import org.kodein.di.ktor.closestDI
 import java.util.UUID
@@ -103,31 +102,44 @@ class TelegramBot(
 }
 
 /**
- * Launches the Telegram getUpdates long-poll loop.
- * Returns early (no-op) when [telegram.botToken] is blank — this keeps tests from polling.
- * Note: intentionally NOT called from [Application.module] yet (Task 7 wires it).
+ * Registers the Telegram webhook route and, at startup, calls [TelegramApi.setWebhook]
+ * to tell Telegram where to deliver updates.
+ *
+ * The route is always registered (so in-memory test suites boot cleanly), but the startup
+ * [TelegramApi.setWebhook] call is only made when both [telegram.webhookSecret] and
+ * [telegram.botToken] are configured.
  */
 fun Application.configureTelegramBot() {
-    val token = environment.config.propertyOrNull("telegram.botToken")?.getString()?.takeIf { it.isNotBlank() } ?: return
-    val hostUserId = environment.config.property("telegram.hostUserId").getString().toLong()
-    val redirectBase = environment.config.propertyOrNull("oauth.redirectBaseUrl")?.getString() ?: "http://localhost:8080"
+    val cfg = environment.config
+    val secret = cfg.propertyOrNull("telegram.webhookSecret")?.getString()?.takeIf { it.isNotBlank() }
+    val botToken = cfg.propertyOrNull("telegram.botToken")?.getString()?.takeIf { it.isNotBlank() }
+    val publicBaseUrl = cfg.propertyOrNull("publicBaseUrl")?.getString() ?: "http://localhost:8080"
+    val hostUserId = cfg.propertyOrNull("telegram.hostUserId")?.getString()?.toLongOrNull() ?: 0L
     val di = closestDI { this@configureTelegramBot }
-    val api: TelegramApi by di.instance()
-    val stateStore: ConnectStateStore by di.instance()
-    val bot = TelegramBot(api, hostUserId, stateStore, CommandProvider(this), QueryProvider(this), redirectBase)
-    launch(Dispatchers.IO) {
-        var offset = 0L
-        while (isActive) {
-            try {
-                val updates = api.getUpdates(offset)
-                for (u in updates) {
-                    offset = u.updateId + 1
-                    bot.handle(u)
-                }
-            } catch (e: Exception) {
-                environment.log.error("Telegram poll loop error", e)
-                delay(3000)
-            }
+    val json = Json { ignoreUnknownKeys = true }
+
+    routing {
+        post("/telegram/webhook/{secret}") {
+            val pathSecret = call.parameters["secret"]
+            val headerSecret = call.request.headers["X-Telegram-Bot-Api-Secret-Token"]
+            if (secret == null || pathSecret != secret || headerSecret != secret)
+                return@post call.respond(HttpStatusCode.Forbidden)
+            val update = try { json.decodeFromString(TgUpdate.serializer(), call.receiveText()) }
+                catch (e: Exception) { return@post call.respond(HttpStatusCode.BadRequest, "bad update") }
+            val api: TelegramApi by di.instance()
+            val stateStore: ConnectStateStore by di.instance()
+            val bot = TelegramBot(api, hostUserId, stateStore, CommandProvider(this@configureTelegramBot), QueryProvider(this@configureTelegramBot), publicBaseUrl)
+            bot.handle(update)
+            call.respond(HttpStatusCode.OK)
+        }
+    }
+
+    // Register the webhook with Telegram at startup (best-effort).
+    if (secret != null && botToken != null) {
+        val api: TelegramApi by di.instance()
+        launch {
+            runCatching { api.setWebhook("$publicBaseUrl/telegram/webhook/$secret", secret) }
+                .onFailure { environment.log.error("Telegram setWebhook failed", it) }
         }
     }
 }

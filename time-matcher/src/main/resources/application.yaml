@@ -6,7 +6,9 @@ ktor:
         port: 8080
 
 db:
-    url: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+    url: "$DB_URL:jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+    user: "$DB_USER:sa"
+    password: "$DB_PASSWORD:"
 
 calendar:
     provider: "$CALENDAR_PROVIDER:inmemory"   # set CALENDAR_PROVIDER=google to enable
@@ -15,9 +17,9 @@ google:
     clientId: "$GOOGLE_CLIENT_ID:"
     clientSecret: "$GOOGLE_CLIENT_SECRET:"
 
-oauth:
-    redirectBaseUrl: "$OAUTH_REDIRECT_BASE_URL:http://localhost:8080"
+publicBaseUrl: "$PUBLIC_BASE_URL:http://localhost:8080"
 
 telegram:
     botToken: "$TELEGRAM_BOT_TOKEN:"
     hostUserId: "$TELEGRAM_HOST_USER_ID:0"
+    webhookSecret: "$TELEGRAM_WEBHOOK_SECRET:"

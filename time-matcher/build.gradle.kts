@@ -7,6 +7,9 @@ val kodein_version: String by project
 val h2_version: String by project
 val flyway_version: String by project
 val exposed_version: String by project
+val postgres_version: String by project
+val hikari_version: String by project
+val testcontainers_version: String by project
 plugins {
     kotlin("jvm") version "2.4.0"
     id("io.ktor.plugin") version "3.5.1"
@@ -55,6 +58,23 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-java-time:$exposed_version")
     implementation("com.h2database:h2:$h2_version")
     implementation("org.flywaydb:flyway-core:$flyway_version")
+    implementation("org.flywaydb:flyway-database-postgresql:$flyway_version")
+    implementation("org.postgresql:postgresql:$postgres_version")
+    implementation("com.zaxxer:HikariCP:$hikari_version")
+    testImplementation("org.testcontainers:testcontainers:$testcontainers_version")
+    testImplementation("org.testcontainers:postgresql:$testcontainers_version")
 }
 
+kotlin { jvmToolchain(25) }
+
 tasks.test { maxParallelForks = 1 }
+
+// Merge all META-INF/services/* files across JARs so no service provider is silently dropped.
+// Shadow 9.x sets DuplicatesStrategy.EXCLUDE by default, which causes mergeServiceFiles() to silently
+// drop duplicate service files before the ServiceFileTransformer can merge them. Setting INCLUDE lets
+// the transformer accumulate all entries — fixing Flyway H2/PG support and any other SPI collisions.
+tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>().configureEach {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    mergeServiceFiles()
+}
+

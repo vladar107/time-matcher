@@ -1,0 +1,7 @@
+build/
+.gradle/
+data/
+*.aot
+*.aotconf
+.env
+.env.*
