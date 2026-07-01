@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: timematcher
+      POSTGRES_USER: timematcher
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-timematcher}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timematcher"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  app:
+    build: ./time-matcher
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/timematcher
+      DB_USER: timematcher
+      DB_PASSWORD: ${DB_PASSWORD:-timematcher}
+      CALENDAR_PROVIDER: ${CALENDAR_PROVIDER:-inmemory}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_HOST_USER_ID: ${TELEGRAM_HOST_USER_ID:-0}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+    ports:
+      - "8080:8080"
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://app:8080
+    depends_on: [app]
+volumes:
+  pgdata:
