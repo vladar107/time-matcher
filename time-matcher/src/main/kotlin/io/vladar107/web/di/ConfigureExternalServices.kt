@@ -25,9 +25,10 @@ import org.kodein.di.singleton
 import java.time.Clock
 
 fun DI.MainBuilder.configureExternalServices(application: Application) {
-    val url = application.environment.config.propertyOrNull("db.url")?.getString()
+    val cfg = application.environment.config
+    val url = cfg.propertyOrNull("db.url")?.getString()
         ?: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
-    Db.init(url)
+    Db.init(url, cfg.propertyOrNull("db.user")?.getString() ?: "sa", cfg.propertyOrNull("db.password")?.getString() ?: "")
     bind<Clock>() with singleton { Clock.systemDefaultZone() }
 
     // Bind TelegramApi unconditionally so both google and in-memory modes can resolve it.

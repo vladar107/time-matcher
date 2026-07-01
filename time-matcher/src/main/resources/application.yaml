@@ -6,7 +6,9 @@ ktor:
         port: 8080
 
 db:
-    url: "jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+    url: "$DB_URL:jdbc:h2:file:./data/timematcher;DB_CLOSE_DELAY=-1"
+    user: "$DB_USER:sa"
+    password: "$DB_PASSWORD:"
 
 calendar:
     provider: "$CALENDAR_PROVIDER:inmemory"   # set CALENDAR_PROVIDER=google to enable
