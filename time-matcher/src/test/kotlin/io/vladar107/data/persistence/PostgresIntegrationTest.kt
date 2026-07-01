@@ -22,7 +22,7 @@ class PostgresIntegrationTest {
         pg.start()
         Db.init(pg.jdbcUrl, pg.username, pg.password)
     }
-    @AfterTest fun stop() = pg.stop()
+    @AfterTest fun stop() { Db.close(); pg.stop() }
 
     @Test fun migrationsApplyAndSettingsSeedOnRealPostgres() = runBlocking {
         // V1 seeds Europe/Paris settings + one IN_MEMORY calendar; V2 adds OAuth columns.
